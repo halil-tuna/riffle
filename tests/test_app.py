@@ -48,7 +48,7 @@ def test_cli_ask_via_stdin(pdf):
     # tkinter yokken soru stdin'den sorulur (pencereli ortamda test_ui.py dener)
     try:
         import tkinter  # noqa: F401
-        if os.environ.get("DISPLAY"):
+        if os.environ.get("DISPLAY") or sys.platform == "win32":   # Windows'ta pencere hep açılır
             pytest.skip("pencereli ortam: soru penceresi test_ui.py'de denenir")
     except ImportError:
         pass

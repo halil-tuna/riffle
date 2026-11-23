@@ -3,6 +3,7 @@ name: Windows kurulum dosyası
 on:
   push:
     tags: ["v*"]
+    branches: ["main"]     # her gönderide testler + paket denenir; sürüm yalnızca etiketle çıkar
   workflow_dispatch:
 
 permissions:
