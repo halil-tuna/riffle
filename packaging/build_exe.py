@@ -41,6 +41,11 @@ def make_icon(path: Path) -> Path:
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):   # Windows'ta boruya yazarken cp1252: ✔ ve Türkçe harfler patlamasın
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
     try:
         import PyInstaller.__main__ as pyi
     except ImportError:
@@ -68,6 +73,7 @@ def main() -> int:
         "--collect-data", "pptx",            # python-pptx şablonu
         "--collect-all", "pillow_heif",
         "--collect-all", "tkinterdnd2",      # tkdnd ikili dosyaları
+        "--add-data", f"{ROOT / 'riffle' / 'fonts'}{sep}riffle/fonts",   # gömülü yazı tipi (OFL)
         "--add-data", f"{ROOT / 'LICENSE'}{sep}.",
         "--add-data", f"{ROOT / 'README.md'}{sep}.",
         "--exclude-module", "matplotlib",

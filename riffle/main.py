@@ -26,6 +26,13 @@ def main(argv: list[str] | None = None) -> int:
     if sys.stdout is None:
         import io
         sys.stdout = sys.stderr = io.StringIO()
+    # Windows'ta çıktı bir boruya giderken (komut satırı, başka program) kodlama cp1252 oluyor ve Türkçe
+    # harfli ilk print UnicodeEncodeError ile işi yarıda kesiyordu ('Tamamlandı', 'Bilinmeyen işlem')
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
 
     from .actions import ACTIONS, BY_ID, ConversionError
 

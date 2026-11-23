@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  PYTHONUTF8: "1"          # Windows konsolu cp1252; betik çıktılarındaki Türkçe harfler/semboller için
+
 jobs:
   test:
     runs-on: windows-latest

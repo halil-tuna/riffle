@@ -79,7 +79,7 @@ def _corner_error(found, truth):
 def test_scan_finds_corners(work, desk, light):
     from riffle import scan
     p = make_photo(work / "foto.jpg", desk=desk, light=light)
-    c = scan.find_corners(cv2.imread(str(p)))
+    c = scan.find_corners(cv2.imdecode(np.fromfile(str(p), np.uint8), cv2.IMREAD_COLOR))
     assert c is not None
     assert _corner_error(c, TRUE_CORNERS) < 0.02 * 3200, c.round().tolist()
 
@@ -88,7 +88,7 @@ def test_scan_cropped_photo_keeps_whole(work):
     """Zaten kırpılmış (kâğıt tüm kareyi kaplıyor) fotoğrafta düzeltme yapılmamalı."""
     from riffle import scan
     p = make_photo(work / "kirpik.jpg", corners=[[0, 0], [3199, 0], [3199, 2399], [0, 2399]], light=False)
-    assert scan.find_corners(cv2.imread(str(p))) is None
+    assert scan.find_corners(cv2.imdecode(np.fromfile(str(p), np.uint8), cv2.IMREAD_COLOR)) is None
     data, (w, h), ok = scan.photo_to_page_image(p)
     assert not ok and (w, h) == (2480, 1860)
 

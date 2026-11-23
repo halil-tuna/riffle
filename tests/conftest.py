@@ -234,6 +234,8 @@ def make_photo(path: Path, desk=(40, 70, 110), corners=None, light=True, size=(3
         yy, xx = np.mgrid[0:H, 0:W]
         g = 0.55 + 0.45 * (xx / W) * (1 - yy / H * 0.6)
         photo = np.clip(photo * g[..., None], 0, 255).astype(np.uint8)
-    cv2.imwrite(str(path), cv2.GaussianBlur(photo, (3, 3), 0), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    # cv2.imwrite Windows'ta Türkçe harfli yolu açamıyor: kodla, dosyaya numpy yazsın
+    ok, buf = cv2.imencode(".jpg", cv2.GaussianBlur(photo, (3, 3), 0), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    buf.tofile(str(path))
     src_pdf.unlink()
     return path

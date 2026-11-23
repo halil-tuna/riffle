@@ -1,9 +1,9 @@
 ; Riffle — Windows kurulum betiği (Inno Setup 6)
-; Derleme:  iscc /DAppVersion=0.7.0 packaging\installer.iss   (önce python packaging\build_exe.py)
+; Derleme:  iscc /DAppVersion=0.7.1 packaging\installer.iss   (önce python packaging\build_exe.py)
 ; Yönetici yetkisi istemez: %LOCALAPPDATA%\Programs\Riffle altına kurar, menü HKCU'ya yazılır.
 
 #ifndef AppVersion
-  #define AppVersion "0.7.0"
+  #define AppVersion "0.7.1"
 #endif
 
 [Setup]

@@ -160,12 +160,12 @@ Program belgenin türünü kendisi anlar:
 
 ## Kurulum — Windows 11 (kolay yol: kurulum dosyası)
 
-GitHub'daki **Releases** sayfasından `Riffle-0.7.0-kurulum.exe`'yi indir, çalıştır (yönetici yetkisi
+GitHub'daki **Releases** sayfasından `Riffle-0.7.1-kurulum.exe`'yi indir, çalıştır (yönetici yetkisi
 istemez). Sağ tık menüsü kendiliğinden eklenir; kaldırınca menü de silinir. Kurulumun son ekranındaki
 bağlantılardan isteğe bağlı bileşenleri kur: LibreOffice (Office → PDF), Tesseract (OCR, *Turkish*'i işaretle),
 Ghostscript (PDF/A).
 
-Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v0.7.0` gibi bir etiket (tag) gönderince
+Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v0.7.1` gibi bir etiket (tag) gönderince
 `.github/workflows/windows-exe.yml` Windows'ta testleri çalıştırır, PyInstaller ile paketler, paketi gerçek bir
 PDF'le dener, Inno Setup ile `…-kurulum.exe` yapar ve sürüme ekler. Elle de çalıştırılabilir
 (Actions → *Windows kurulum dosyası* → *Run workflow*; çıktı *Artifacts* altında).
@@ -277,6 +277,7 @@ Kaynak kodu açık olduğu sürece kullanabilir, değiştirebilir, dağıtabilir
 Kullanılan bileşenler: PyMuPDF (AGPL-3.0, Artifex), pdf2docx (MIT; 0.5.8 öncesi GPL-3.0), Pillow (MIT-CMU),
 python-pptx (MIT), openpyxl (MIT), pillow-heif (BSD-3) / libheif (LGPL-3.0), pywin32 (PSF).
 opencv-python-headless (Apache-2.0), pymupdf4llm (AGPL-3.0), tkinterdnd2 (MIT).
+Yazı tipi: Liberation Sans (SIL Open Font License 1.1, `riffle/fonts/OFL.txt`).
 Ayrı programlar: LibreOffice (MPL-2.0), Tesseract (Apache-2.0), Ghostscript (AGPL-3.0).
 Kapalı kaynak dağıtım istenirse: PyMuPDF yerine pypdfium2 (Apache/BSD) + pikepdf (MPL-2.0) ve
 PDF → Word için ticari lisans ya da port gerekir.

@@ -21,7 +21,11 @@ from .actions import pymupdf
 SUBSCRIPT_FLAG = 1 << 12          # pdf2docx'in kullanmadığı bir bayrak biti: "alt simge"
 
 LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
-             "ﬅ": "st", "ﬆ": "st"}
+             "ﬅ": "st", "ﬆ": "st",
+             # PDF'te çizilmiş bir yumuşak tire (U+00AD) görünür bir tiredir: Arial gibi tire ile yumuşak
+             # tireyi aynı harf şekline bağlayan yazı tipleri metne '\xad' koyuyor, satır sonu birleştirme
+             # ve birleşik kelimeler ('water-based') bunu görmüyordu
+             "\u00ad": "-"}
 
 # Elsevier / Bitstream "MathematicalPi" fontlarının glif adları (H + kod) — standart listede yok.
 # Küçük Yunan harfleri sıralı (H9262 = μ gerçek bir makalede doğrulandı); emin olunmayan kodlar

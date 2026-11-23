@@ -55,7 +55,9 @@ def find_sensitive(text: str, extra: list[str] | None = None) -> list[tuple[str,
     for w in extra or []:
         w = w.strip()
         if len(w) >= 2:
-            for m in re.finditer(re.escape(w), text, re.I):
+            # kelime arası boşluk PDF'te bölünmez boşluk (U+00A0) ya da satır sonu olabilir
+            pat = r"\s+".join(re.escape(x) for x in w.split())
+            for m in re.finditer(pat, text, re.I):
                 hits.append(("özel", m.group(0)))
     return hits
 

@@ -350,6 +350,11 @@ def check_optional() -> None:
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):   # Windows'ta boruya yazarken cp1252: ✔ ve Türkçe harfler patlamasın
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
     args = set(sys.argv[1:])
     if "--uninstall" in args:
         uninstall_windows() if IS_WIN else uninstall_linux()

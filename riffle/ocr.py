@@ -219,15 +219,19 @@ def needs_ocr(page) -> bool:
 
 # ------------------------------------------------------------------ yazı tipi
 
-# Arial ölçüleri önce (Liberation Sans Arial ile birebir aynı genişlikte): taramadan kurulan metin
-# orijinal satır genişliğine otursun. DejaVu daha geniş, son çare.
+# Programla gelen Liberation Sans önce: Arial ile birebir aynı genişlikte (taramadan kurulan metin
+# orijinal satır genişliğine oturur) ve her bilgisayarda aynı sonuç. Windows'un Arial'ı ikinci sırada
+# değil son çarelerden: Arial'da boşluk ile bölünmez boşluk (U+00A0), tire ile yumuşak tire (U+00AD)
+# aynı harf şekli; PDF'e gömülünce metin kopyalanınca/aranınca 'Başlık 1' yerine 'Başlık\xa01' çıkıyordu.
+_BUNDLED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 _FONT_CANDIDATES = [
-    (r"C:\Windows\Fonts\arial.ttf", r"C:\Windows\Fonts\arialbd.ttf"),
+    (os.path.join(_BUNDLED, "LiberationSans-Regular.ttf"), os.path.join(_BUNDLED, "LiberationSans-Bold.ttf")),
     ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
      "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
     ("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
      "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
     ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    (r"C:\Windows\Fonts\arial.ttf", r"C:\Windows\Fonts\arialbd.ttf"),
     ("/Library/Fonts/Arial.ttf", "/Library/Fonts/Arial Bold.ttf"),
 ]
 
