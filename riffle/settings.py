@@ -20,6 +20,7 @@ DEFAULTS = {
     "output": "beside",       # beside | desktop | folder | ask
     "output_dir": "",
     "parallel": True,         # çok dosyada işlemciyi tam kullan
+    "theme": "system",        # system | light | dark
 }
 FAV_AUTO = 3
 FAV_MIN_USES = 3
@@ -154,24 +155,25 @@ def run(paths=None, progress=print, **_) -> list:
     root = tk.Tk()
     root.title(f"{APP_NAME} — Ayarlar")
     root.geometry(f"720x{min(780, root.winfo_screenheight() - 80)}")
-    try:
-        ttk.Style().theme_use("vista" if sys.platform == "win32" else "clam")
-    except tk.TclError:
-        pass
+    from . import theme
+    pal = theme.setup(root)
+    ttk.Label(root, text="Ayarlar", style="Heading.TLabel", padding=(20, 16, 20, 4)).pack(anchor="w")
     nb = ttk.Notebook(root)
-    nb.pack(fill="both", expand=True, padx=10, pady=10)
+    nb.pack(fill="both", expand=True, padx=16, pady=(6, 10))
+    gen = ttk.Frame(nb, padding=(16, 14))
+    nb.add(gen, text="Genel")
 
     # --- Menü sekmesi
-    menu_tab = ttk.Frame(nb, padding=8)
+    menu_tab = ttk.Frame(nb, padding=(16, 12))
     nb.add(menu_tab, text="Sağ tık menüsü")
     ttk.Label(menu_tab, text="Göster: menüde görünsün · Üstte: menünün en başına sabitle",
-              foreground="#5b6270").pack(anchor="w")
+              style="Muted.TLabel").pack(anchor="w")
     auto = tk.BooleanVar(value=s["auto_favorites"])
     ttk.Checkbutton(menu_tab, text=f"En çok kullandığım {FAV_AUTO} işlemi kendiliğinden en üste al",
                     variable=auto).pack(anchor="w", pady=(4, 6))
     box = ttk.Frame(menu_tab)
     box.pack(fill="both", expand=True)
-    cv = tk.Canvas(box, highlightthickness=0, background=ttk.Style().lookup("TFrame", "background") or None)
+    cv = tk.Canvas(box, highlightthickness=0, background=pal.bg)
     sb = ttk.Scrollbar(box, orient="vertical", command=cv.yview)
     inner = ttk.Frame(cv)
     inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
@@ -186,10 +188,10 @@ def run(paths=None, progress=print, **_) -> list:
         root.bind_all(seq, wheel)
 
     show_vars, pin_vars = {}, {}
-    ttk.Label(inner, text="Göster", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, padx=4)
-    ttk.Label(inner, text="Üstte", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, padx=4)
-    ttk.Label(inner, text="İşlem", font=("Segoe UI", 9, "bold")).grid(row=0, column=2, sticky="w")
-    ttk.Label(inner, text="Kullanım", font=("Segoe UI", 9, "bold")).grid(row=0, column=3, padx=8)
+    ttk.Label(inner, text="Göster", style="Strong.TLabel").grid(row=0, column=0, padx=4)
+    ttk.Label(inner, text="Üstte", style="Strong.TLabel").grid(row=0, column=1, padx=4)
+    ttk.Label(inner, text="İşlem", style="Strong.TLabel").grid(row=0, column=2, sticky="w", padx=(6, 0))
+    ttk.Label(inner, text="Kullanım", style="Strong.TLabel").grid(row=0, column=3, padx=12)
     groups: dict = {}
     for a in ACTIONS:                        # menüdeki gruplar sırasıyla, her grup bir kez
         if a.id not in NEVER_HIDE:
@@ -199,28 +201,38 @@ def run(paths=None, progress=print, **_) -> list:
     row, last_group = 1, None
     for g, a in ((g, a) for g, acts in groups.items() for a in acts):
         if g != last_group:
-            ttk.Label(inner, text=g, foreground="#2f6fdd").grid(row=row, column=0, columnspan=4, sticky="w",
-                                                                  pady=(8, 0))
+            ttk.Label(inner, text=g, style="Section.TLabel").grid(row=row, column=0, columnspan=4, sticky="w",
+                                                                    pady=(12, 2))
             row += 1
             last_group = g
         sv = tk.BooleanVar(value=a.id not in s["hidden"])
         pv = tk.BooleanVar(value=a.id in s["pinned"])
         ttk.Checkbutton(inner, variable=sv).grid(row=row, column=0)
         ttk.Checkbutton(inner, variable=pv).grid(row=row, column=1)
-        ttk.Label(inner, text=a.label).grid(row=row, column=2, sticky="w")
-        ttk.Label(inner, text=str(use.get(a.id, "")), foreground="#5b6270").grid(row=row, column=3)
+        ttk.Label(inner, text=a.label).grid(row=row, column=2, sticky="w", padx=(6, 0))
+        ttk.Label(inner, text=str(use.get(a.id, "")), style="Muted.TLabel").grid(row=row, column=3)
         show_vars[a.id], pin_vars[a.id] = sv, pv
         row += 1
 
     # --- Genel sekmesi
-    gen = ttk.Frame(nb, padding=12)
-    nb.add(gen, text="Genel")
-    ttk.Label(gen, text="Çıkan dosyalar nereye kaydedilsin?", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+    ttk.Label(gen, text="Görünüm", style="Strong.TLabel").pack(anchor="w")
+    look = tk.StringVar(value=s.get("theme", "system"))
+
+    def preview(*_):
+        """Seçilen görünümü bu pencerede hemen dene (kaydedince bütün pencerelere geçer)."""
+        dark = theme.system_is_dark() if look.get() == "system" else look.get() == "dark"
+        cv.configure(background=theme.switch(root, dark).bg)
+    lrow = ttk.Frame(gen)
+    lrow.pack(anchor="w", pady=(4, 0))
+    for val, text in (("system", "Sistemle aynı"), ("light", "Açık"), ("dark", "Koyu")):
+        ttk.Radiobutton(lrow, text=text, value=val, variable=look, command=preview).pack(side="left", padx=(0, 16))
+    ttk.Separator(gen).pack(fill="x", pady=14)
+    ttk.Label(gen, text="Çıkan dosyalar nereye kaydedilsin?", style="Strong.TLabel").pack(anchor="w")
     out = tk.StringVar(value=s["output"])
     out_dir = tk.StringVar(value=s["output_dir"])
     for val, text in (("beside", "Kaynak dosyanın yanına"), ("desktop", f"Masaüstüne ({desktop()})"),
                       ("ask", "Her seferinde sor")):
-        ttk.Radiobutton(gen, text=text, value=val, variable=out).pack(anchor="w", pady=1)
+        ttk.Radiobutton(gen, text=text, value=val, variable=out).pack(anchor="w", pady=2)
     fr = ttk.Frame(gen)
     fr.pack(anchor="w", fill="x", pady=1)
     ttk.Radiobutton(fr, text="Şu klasöre:", value="folder", variable=out).pack(side="left")
@@ -233,19 +245,20 @@ def run(paths=None, progress=print, **_) -> list:
             out.set("folder")
     ttk.Button(fr, text="Seç…", command=pick).pack(side="left")
     par = tk.BooleanVar(value=s["parallel"])
-    ttk.Separator(gen).pack(fill="x", pady=10)
+    ttk.Separator(gen).pack(fill="x", pady=14)
+    ttk.Label(gen, text="Hız", style="Strong.TLabel").pack(anchor="w", pady=(0, 4))
     ttk.Checkbutton(gen, text="Çok dosya seçince işlemcinin bütün çekirdeklerini kullan (daha hızlı)",
                     variable=par).pack(anchor="w")
-    ttk.Separator(gen).pack(fill="x", pady=10)
+    ttk.Separator(gen).pack(fill="x", pady=14)
 
     def reset_use():
         _write("kullanim.json", {})
         messagebox.showinfo(APP_NAME, "Kullanım sayaçları sıfırlandı.", parent=root)
     ttk.Button(gen, text="Kullanım sayaçlarını sıfırla", command=reset_use).pack(anchor="w")
 
-    foot = ttk.Frame(root, padding=(10, 0, 10, 10))
+    foot = ttk.Frame(root, padding=(16, 0, 16, 14))
     foot.pack(fill="x")
-    status = ttk.Label(foot, foreground="#2c7a3f")
+    status = ttk.Label(foot, foreground=pal.success)
     status.pack(side="left")
 
     def do_save(*_):
@@ -255,6 +268,7 @@ def run(paths=None, progress=print, **_) -> list:
         s["output"] = out.get()
         s["output_dir"] = out_dir.get()
         s["parallel"] = par.get()
+        s["theme"] = look.get()
         if s["output"] == "folder" and not Path(s["output_dir"]).is_dir():
             messagebox.showerror(APP_NAME, "Seçilen çıktı klasörü bulunamadı.", parent=root)
             return
@@ -267,7 +281,7 @@ def run(paths=None, progress=print, **_) -> list:
         print("Ayarlar kaydedildi")
         sys.stdout.flush()
 
-    ttk.Button(foot, text="Kaydet", command=do_save).pack(side="right")
+    ttk.Button(foot, text="Kaydet", style="Accent.TButton", width=12, command=do_save).pack(side="right")
     root.bind("<Control-s>", lambda e: (do_save(), "break")[1])
     autoclose = os.environ.get("RIFFLE_AUTOCLOSE_MS")
     if autoclose:

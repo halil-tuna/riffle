@@ -8,3 +8,5 @@ pillow-heif>=0.16
 opencv-python-headless>=4.8
 pywin32>=306; sys_platform == "win32"
 tkinterdnd2>=0.4      # isteğe bağlı: Gezgin'den sayfa düzenleyiciye sürükle-bırak
+sv-ttk>=2.6        # Windows 11 görünümü (MIT)
+darkdetect>=0.8    # sistem koyu modu (BSD-3)

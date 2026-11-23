@@ -254,7 +254,12 @@ def pdf_to_markdown(paths, progress, **_):
         with open_pdf(p) as doc:
             try:
                 import pymupdf4llm
-                md = pymupdf4llm.to_markdown(doc, show_progress=False)
+                try:
+                    md = pymupdf4llm.to_markdown(doc, show_progress=False)
+                except (OSError, RuntimeError, ValueError):
+                    # sayfa düzeni modeli yüklenemedi (eksik/bozuk dosya): modelsiz yola düş
+                    pymupdf4llm.use_layout(False)
+                    md = pymupdf4llm.to_markdown(doc, show_progress=False)
             except ImportError:
                 md = "\n\n".join(page.get_text() for page in doc)   # yedek: düz metin
             empty = sum(1 for page in doc if len(page.get_text().strip()) < 10)

@@ -153,23 +153,26 @@ def run(paths: list[Path], progress=print, query: str = "", **_) -> list[Path]:
     root.title(f"{APP_NAME} — Klasörde ara — {folder.name}")
     root.geometry("980x600")
     root.minsize(640, 360)
-    try:
-        ttk.Style().theme_use("vista" if sys.platform == "win32" else "clam")
-    except tk.TclError:
-        pass
-    top = ttk.Frame(root, padding=10)
+    from . import theme
+    theme.setup(root)
+    head = ttk.Frame(root, padding=(20, 16, 20, 0))
+    head.pack(fill="x")
+    ttk.Label(head, text="Klasörde ara", style="Heading.TLabel").pack(anchor="w")
+    ttk.Label(head, text=f"{folder.name} klasörü ve alt klasörleri · PDF, Word, PowerPoint, Excel, metin; "
+                         "Türkçe harf ve büyük/küçük farkı gözetmez", style="Muted.TLabel").pack(anchor="w")
+    top = ttk.Frame(root, padding=(20, 12, 20, 6))
     top.pack(fill="x")
-    ttk.Label(top, text="Aranacak:").pack(side="left")
     qv = tk.StringVar(value=query)
-    ent = ttk.Entry(top, textvariable=qv, width=40, font=("Segoe UI", 11))
-    ent.pack(side="left", padx=6, fill="x", expand=True)
-    btn = ttk.Button(top, text="Ara")
-    btn.pack(side="left")
-    status = ttk.Label(root, padding=(10, 0), foreground="#5b6270")
+    ent = ttk.Entry(top, textvariable=qv, width=40)
+    ent.pack(side="left", fill="x", expand=True)
+    btn = ttk.Button(top, text="Ara", style="Accent.TButton", width=10)
+    btn.pack(side="left", padx=(8, 0))
+    status = ttk.Label(root, padding=(20, 0), style="Muted.TLabel")
     status.pack(fill="x")
-    frame = ttk.Frame(root, padding=10)
+    ttk.Style(root).configure("Results.Treeview", rowheight=28)
+    frame = ttk.Frame(root, padding=(20, 8, 20, 4))
     frame.pack(fill="both", expand=True)
-    tree = ttk.Treeview(frame, columns=("file", "where", "ctx"), show="headings")
+    tree = ttk.Treeview(frame, columns=("file", "where", "ctx"), show="headings", style="Results.Treeview")
     for col, text, w in (("file", "Dosya", 220), ("where", "Yer", 90), ("ctx", "Geçtiği yer", 600)):
         tree.heading(col, text=text)
         tree.column(col, width=w, anchor="w", stretch=(col == "ctx"))
@@ -177,7 +180,8 @@ def run(paths: list[Path], progress=print, query: str = "", **_) -> list[Path]:
     tree.configure(yscrollcommand=sb.set)
     tree.pack(side="left", fill="both", expand=True)
     sb.pack(side="left", fill="y")
-    ttk.Label(root, text="Çift tık: dosyayı aç", padding=(10, 0, 10, 8), foreground="#5b6270").pack(anchor="w")
+    ttk.Label(root, text="Çift tık ya da Enter: dosyayı aç · Esc: kapat", padding=(20, 0, 20, 12),
+              style="Muted.TLabel").pack(anchor="w")
 
     state = {"gen": 0, "paths": {}}
 

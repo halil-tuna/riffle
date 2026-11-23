@@ -18,17 +18,9 @@ from .actions import ConversionError, fix_tounicode, open_pdf, pymupdf, unique_p
 
 def config_dir() -> Path:
     if sys.platform == "win32":
-        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-        d, old = base / "Riffle", base / "PratikCevirici"
+        d = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Riffle"
     else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-        d, old = base / "riffle", base / "pratik-cevirici"
-    if not d.exists() and old.is_dir():
-        # eski adla (Pratik Çevirici) kaydedilmiş imza, ayarlar ve sık kullanılanlar yeni ada taşınır
-        try:
-            old.rename(d)
-        except OSError:
-            pass
+        d = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "riffle"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

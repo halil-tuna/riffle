@@ -204,43 +204,11 @@ def test_windows_reinstall_and_uninstall(installer):
     assert not [k for k in reg.keys if "Riffle" in k]
 
 
-def test_windows_removes_old_name_menu(installer):
-    """0.7.0 öncesi 'Pratik Çevirici' menüsü (pdf + klasör) Riffle kurulunca silinir: iki menü kalmaz."""
+def test_windows_menu_has_icon(installer):
     install, reg = installer
-    w = reg.module
-    for k in (r"Software\Classes\SystemFileAssociations\.pdf\shell\PratikCevirici\shell\00_x",
-              r"Software\Classes\SystemFileAssociations\.pdf\shell\PratikCevirici_2",
-              r"Software\Classes\SystemFileAssociations\.docx\shell\PratikCevirici",
-              r"Software\Classes\Directory\shell\PratikCevirici",
-              r"Software\Classes\Directory\Background\shell\PratikCevirici\shell\a"):
-        with w.CreateKey("HKCU", k):
-            pass
     install.install_windows()
-    assert not [k for k in reg.keys if "PratikCevirici" in k]
-    assert [k for k in reg.keys if k.endswith(r"\.pdf\shell\Riffle")]
-
-
-def test_linux_removes_old_name_actions(tmp_path, monkeypatch):
-    sys.path.insert(0, str(ROOT))
-    import install
-    monkeypatch.setattr(install, "NEMO_DIR", tmp_path)
-    (tmp_path / "pratik_compress.nemo_action").write_text("x")
-    install.install_linux()
-    assert not list(tmp_path.glob("pratik_*")) and list(tmp_path.glob("riffle_*"))
-    install.uninstall_linux()
-    assert not list(tmp_path.glob("*.nemo_action"))
-
-
-def test_config_moves_from_old_name(tmp_path, monkeypatch):
-    from riffle import stamp_model
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    old = tmp_path / ("PratikCevirici" if sys.platform == "win32" else "pratik-cevirici")
-    old.mkdir()
-    (old / "ayarlar.json").write_text('{"output": "desktop"}', encoding="utf-8")
-    d = stamp_model.config_dir()
-    assert (d / "ayarlar.json").read_text(encoding="utf-8") == '{"output": "desktop"}'
-    assert not old.exists()
+    roots = [v for k, v in reg.keys.items() if k.endswith(r"\.pdf\shell\Riffle") or k.endswith(r"Directory\shell\Riffle")]
+    assert len(roots) == 2 and all(v.get("Icon", "").endswith("riffle.ico") for v in roots)
 
 
 def test_windows_menu_frozen_exe(installer, monkeypatch):

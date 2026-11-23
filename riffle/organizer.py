@@ -24,8 +24,8 @@ from .organizer_model import Document
 
 CELL_W, CELL_H, THUMB = 168, 214, 150
 PAD = 14
-SEL = "#2f6fdd"
-SPLIT = "#d9480f"
+SEL = "#2f60d8"     # seçim (açık ve koyu temada aynı)
+SPLIT = "#d9480f"   # bölme işareti (simgedeki turuncu)
 
 
 def run(paths: list[Path], progress=print) -> list[Path]:
@@ -42,10 +42,9 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     root.title(f"{APP_NAME} — Sayfa düzenleyici")
     root.geometry(f"{min(1180, root.winfo_screenwidth() - 60)}x{min(760, root.winfo_screenheight() - 80)}")
     root.minsize(640, 420)
-    try:
-        ttk.Style().theme_use("vista" if sys.platform == "win32" else "clam")
-    except tk.TclError:
-        pass
+    from . import theme
+    pal = theme.setup(root)
+    fam = theme.ui_family(root)
 
     saved: list[Path] = []
     sel: set[int] = set()          # seçili sayfa dizinleri
@@ -59,17 +58,16 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     bar.pack(fill="x")
     body = ttk.Frame(root)
     body.pack(fill="both", expand=True)
-    canvas = tk.Canvas(body, background="#eef0f3", highlightthickness=0)
+    canvas = tk.Canvas(body, background=pal.canvas, highlightthickness=0)
     vs = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
     canvas.configure(yscrollcommand=vs.set)
     vs.pack(side="right", fill="y")
     canvas.pack(side="left", fill="both", expand=True)
-    foot = ttk.Frame(root, padding=(8, 6))
+    foot = ttk.Frame(root, padding=(10, 8))
     foot.pack(fill="x")
     status = ttk.Label(foot, anchor="w")
-    style = ttk.Style()
-    style.configure("Tool.TButton", padding=(6, 2))
-    style.configure("Save.TButton", padding=(14, 4), font=("Segoe UI", 10, "bold"))
+    style = ttk.Style(root)
+    style.configure("Tool.TButton", padding=(8, 3))
 
     def btn(text, cmd, tip=None):
         b = ttk.Button(bar, text=text, command=cmd, style="Tool.TButton", width=len(text) + 1)
@@ -138,24 +136,25 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         for i, p in enumerate(doc.pages):
             x, y = cell_xy(i)
             selected = i in sel
-            canvas.create_rectangle(x, y, x + CELL_W, y + CELL_H, fill="#ffffff",
-                                    outline=SEL if selected else "#cfd4da", width=3 if selected else 1)
+            canvas.create_rectangle(x, y, x + CELL_W, y + CELL_H, fill=pal.surface,
+                                    outline=SEL if selected else pal.border, width=3 if selected else 1)
             img = images.get((p.uid, p.rotation))
             if img is None:
                 request_thumb(p)
-                canvas.create_text(x + CELL_W / 2, y + THUMB / 2 + 8, text="…", fill="#999")
+                canvas.create_text(x + CELL_W / 2, y + THUMB / 2 + 8, text="…", fill=pal.muted)
             else:
                 canvas.create_image(x + CELL_W / 2, y + 8 + THUMB / 2, image=img)
             label = p.label if len(p.label) <= 24 else p.label[:22] + "…"
-            canvas.create_text(x + CELL_W / 2, y + CELL_H - 30, text=f"{i + 1}", font=("Segoe UI", 10, "bold"))
-            canvas.create_text(x + CELL_W / 2, y + CELL_H - 13, text=label, fill="#555", font=("Segoe UI", 8))
+            canvas.create_text(x + CELL_W / 2, y + CELL_H - 30, text=f"{i + 1}", fill=pal.fg,
+                               font=(fam, 10, "bold"))
+            canvas.create_text(x + CELL_W / 2, y + CELL_H - 13, text=label, fill=pal.muted, font=(fam, 8))
             if p.rotation:
                 canvas.create_text(x + CELL_W - 8, y + 10, text=f"↻{p.rotation}°", anchor="ne",
-                                   fill=SEL, font=("Segoe UI", 8, "bold"))
+                                   fill=SEL, font=(fam, 8, "bold"))
             if p.uid in doc.split_after and i < n - 1:
                 sx = x + CELL_W + PAD / 2
                 canvas.create_line(sx, y - 4, sx, y + CELL_H + 4, fill=SPLIT, width=3, dash=(6, 4))
-                canvas.create_text(sx, y - 6, text="✂", fill=SPLIT, font=("Segoe UI", 12, "bold"))
+                canvas.create_text(sx, y - 6, text="✂", fill=SPLIT, font=(fam, 12, "bold"))
         if drag["active"] and drag["gap"] is not None:
             g = drag["gap"]
             if g < n:
@@ -279,7 +278,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     btn("A→Z", lambda: (doc.sort_by_name(), after_change()))
     btn("Ters sıra", lambda: (doc.reverse(), after_change()))
     # alt çubuk: durum solda; kaydetme ve ayar sağda (pencere daralsa da görünür kalır)
-    save_btn = ttk.Button(foot, text="Kaydet", command=save, style="Save.TButton")
+    save_btn = ttk.Button(foot, text="Kaydet", command=save, style="Accent.TButton", width=12)
     save_btn.pack(side="right", padx=(6, 0))
     open_btn = ttk.Button(foot, text="Klasörü aç", command=open_folder, state="disabled", style="Tool.TButton")
     open_btn.pack(side="right", padx=2)
@@ -383,6 +382,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         top = tk.Toplevel(root)
         top.title(f"{APP_NAME} — Önizleme")
         top.transient(root)
+        theme.window(top)
         side = int(min(root.winfo_screenheight() * 0.82, 1100))
         cv = tk.Canvas(top, background="#3a3d42", highlightthickness=0, width=int(side * 0.78), height=side)
         cv.pack(fill="both", expand=True)

@@ -165,19 +165,19 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
     root.title(f"{APP_NAME} — Form doldur — {src.name}")
     root.geometry(f"720x{min(760, root.winfo_screenheight() - 80)}")
     root.minsize(480, 320)
-    try:
-        ttk.Style().theme_use("vista" if sys.platform == "win32" else "clam")
-    except tk.TclError:
-        pass
-    head = ttk.Frame(root, padding=(12, 10, 12, 4))
+    from . import theme
+    pal = theme.setup(root)
+    head = ttk.Frame(root, padding=(20, 16, 20, 8))
     head.pack(fill="x")
-    ttk.Label(head, text=f"{len(fields)} alan · {npages} sayfa", foreground="#5b6270").pack(side="left")
+    ttk.Label(head, text=src.stem, style="Heading.TLabel").pack(anchor="w")
+    ttk.Label(head, text=f"{len(fields)} alan · {npages} sayfa · Ctrl+S kaydeder",
+              style="Muted.TLabel").pack(anchor="w")
 
     outer = ttk.Frame(root)
     outer.pack(fill="both", expand=True)
-    canvas = tk.Canvas(outer, highlightthickness=0, background=ttk.Style().lookup("TFrame", "background") or None)
+    canvas = tk.Canvas(outer, highlightthickness=0, background=pal.bg)
     sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-    inner = ttk.Frame(canvas, padding=(12, 4))
+    inner = ttk.Frame(canvas, padding=(20, 4))
     inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
     win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
     canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win_id, width=e.width))
@@ -197,36 +197,37 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
     first_input = None
     for f in fields:
         if f.page != last_page and npages > 1:
-            ttk.Label(inner, text=f"Sayfa {f.page + 1}", font=("Segoe UI", 10, "bold")).grid(
-                row=row, column=0, columnspan=2, sticky="w", pady=(10, 2))
+            ttk.Label(inner, text=f"Sayfa {f.page + 1}", style="Section.TLabel").grid(
+                row=row, column=0, columnspan=2, sticky="w", pady=(12, 4))
             row += 1
             last_page = f.page
         ttk.Label(inner, text=f.label, wraplength=230, justify="left").grid(
-            row=row, column=0, sticky="nw", padx=(0, 10), pady=4)
+            row=row, column=0, sticky="nw", padx=(0, 14), pady=(9, 5))
         state = "disabled" if f.readonly else "normal"
         if f.kind == TEXT and f.multiline:
-            t = tk.Text(inner, height=4, wrap="word", font=("Segoe UI", 10), relief="solid", borderwidth=1)
+            t = tk.Text(inner, height=4, wrap="word", font=(theme.ui_family(root), 10))
+            theme.style_text(t, pal)
             t.insert("1.0", f.value or "")
             t.configure(state=state)
-            t.grid(row=row, column=1, sticky="ew", pady=4)
+            t.grid(row=row, column=1, sticky="ew", pady=5)
             getters[f.name] = lambda t=t: t.get("1.0", "end-1c")
             widget = t
         elif f.kind == TEXT:
             v = tk.StringVar(value=f.value or "")
             e = ttk.Entry(inner, textvariable=v, state=state)
-            e.grid(row=row, column=1, sticky="ew", pady=4)
+            e.grid(row=row, column=1, sticky="ew", pady=5)
             getters[f.name] = v.get
             widget = e
         elif f.kind == CHECK:
             v = tk.BooleanVar(value=bool(f.value))
             c = ttk.Checkbutton(inner, variable=v, state=state)
-            c.grid(row=row, column=1, sticky="w", pady=4)
+            c.grid(row=row, column=1, sticky="w", pady=6)
             getters[f.name] = v.get
             widget = c
         elif f.kind == RADIO:
             v = tk.StringVar(value=f.value or "")
             box = ttk.Frame(inner)
-            box.grid(row=row, column=1, sticky="w", pady=4)
+            box.grid(row=row, column=1, sticky="w", pady=6)
             for on, lab in f.options:
                 ttk.Radiobutton(box, text=lab, value=on, variable=v, state=state).pack(side="left", padx=(0, 12))
             getters[f.name] = v.get
@@ -235,20 +236,21 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
             v = tk.StringVar(value=f.value or "")
             cb = ttk.Combobox(inner, textvariable=v, values=f.options,
                               state=("normal" if f.editable_choice else "readonly") if not f.readonly else "disabled")
-            cb.grid(row=row, column=1, sticky="ew", pady=4)
+            cb.grid(row=row, column=1, sticky="ew", pady=5)
             getters[f.name] = v.get
             widget = cb
         if first_input is None and not f.readonly and f.kind in (TEXT, COMBO, LIST):
             first_input = widget
         row += 1
 
-    foot = ttk.Frame(root, padding=10)
+    ttk.Separator(root).pack(fill="x")
+    foot = ttk.Frame(root, padding=(20, 12))
     foot.pack(fill="x")
     flat = tk.BooleanVar(value=False)
     ttk.Checkbutton(foot, text="Düzleştir (alanlar düz yazı olsun, sonradan değiştirilemesin)",
                     variable=flat).pack(side="left")
     saved: list[Path] = []
-    status = ttk.Label(root, padding=(12, 0, 12, 8), foreground="#2c7a3f")
+    status = ttk.Label(root, padding=(20, 0, 20, 10), foreground=pal.success)
     status.pack(fill="x")
 
     def save(*_):
@@ -263,7 +265,7 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
         print("Tamamlandı:", out.name)
         sys.stdout.flush()
 
-    ttk.Button(foot, text="Kaydet", command=save).pack(side="right")
+    ttk.Button(foot, text="Kaydet", style="Accent.TButton", width=12, command=save).pack(side="right")
     root.bind("<Control-s>", lambda e: (save(), "break")[1])
     if first_input is not None:
         first_input.focus_set()

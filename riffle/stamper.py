@@ -42,11 +42,15 @@ def signature_dialog(parent):
     top.title(f"{APP_NAME} — İmza")
     top.transient(parent)
     top.resizable(False, False)
-    ttk.Label(top, text="Fareyle (ya da dokunmatik kalemle) imzanı at, veya beyaz kâğıda attığın "
-                        "imzanın fotoğrafını yükle.", padding=(10, 8)).pack(anchor="w")
+    from . import theme
+    theme.window(top)
+    pal = theme.palette()
+    ttk.Label(top, text="İmzanı at", style="Strong.TLabel", padding=(16, 14, 16, 0)).pack(anchor="w")
+    ttk.Label(top, text="Fareyle ya da dokunmatik kalemle çiz; veya beyaz kâğıda attığın imzanın fotoğrafını yükle.",
+              style="Muted.TLabel", padding=(16, 2, 16, 10)).pack(anchor="w")
     cv = tk.Canvas(top, width=W, height=H, background="white", highlightthickness=1,
-                   highlightbackground="#b8bec8", cursor="pencil")
-    cv.pack(padx=10)
+                   highlightbackground=pal.border, cursor="pencil")
+    cv.pack(padx=16)
     cv.create_line(30, H - 50, W - 30, H - 50, fill="#d6dae0", dash=(4, 3))
     strokes: list[list] = []
     result = {"png": None}
@@ -88,12 +92,12 @@ def signature_dialog(parent):
 
     cv.bind("<ButtonPress-1>", down)
     cv.bind("<B1-Motion>", move)
-    row = ttk.Frame(top, padding=10)
+    row = ttk.Frame(top, padding=(16, 12, 16, 14))
     row.pack(fill="x")
     ttk.Button(row, text="Temizle", command=clear).pack(side="left")
-    ttk.Button(row, text="Fotoğraftan yükle…", command=load).pack(side="left", padx=6)
-    ttk.Button(row, text="Tamam", command=ok).pack(side="right")
-    ttk.Button(row, text="İptal", command=top.destroy).pack(side="right", padx=6)
+    ttk.Button(row, text="Fotoğraftan yükle…", command=load).pack(side="left", padx=8)
+    ttk.Button(row, text="Tamam", style="Accent.TButton", width=10, command=ok).pack(side="right")
+    ttk.Button(row, text="İptal", width=10, command=top.destroy).pack(side="right", padx=8)
     top.bind("<Return>", lambda e: ok())
     top.bind("<Escape>", lambda e: top.destroy())
     top.grab_set()
@@ -104,7 +108,8 @@ def signature_dialog(parent):
 
 def run(paths: list[Path], progress=print) -> list[Path]:
     import tkinter as tk
-    from tkinter import filedialog, messagebox, simpledialog, ttk
+    from tkinter import filedialog, messagebox, ttk
+    from .ui import _dialog
 
     src = Path(paths[0])
     doc = open_pdf(src)
@@ -113,13 +118,10 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     root.title(f"{APP_NAME} — İmza / yazı / görsel ekle — {src.name}")
     root.geometry(f"{min(1000, root.winfo_screenwidth() - 60)}x{min(860, root.winfo_screenheight() - 80)}")
     root.minsize(560, 480)
-    try:
-        ttk.Style().theme_use("vista" if sys.platform == "win32" else "clam")
-    except tk.TclError:
-        pass
-    style = ttk.Style()
-    style.configure("Tool.TButton", padding=(6, 2))
-    style.configure("Save.TButton", padding=(14, 4), font=("Segoe UI", 10, "bold"))
+    from . import theme
+    pal = theme.setup(root)
+    style = ttk.Style(root)
+    style.configure("Tool.TButton", padding=(8, 3))
 
     stamps: list[sm.Stamp] = []
     history: list[list] = []
@@ -130,11 +132,11 @@ def run(paths: list[Path], progress=print) -> list[Path]:
 
     bar = ttk.Frame(root, padding=(8, 6))
     bar.pack(fill="x")
-    canvas = tk.Canvas(root, background="#e6e8ec", highlightthickness=0)
+    canvas = tk.Canvas(root, background=pal.canvas, highlightthickness=0)
     canvas.pack(fill="both", expand=True)
-    foot = ttk.Frame(root, padding=(8, 6))
+    foot = ttk.Frame(root, padding=(10, 8))
     foot.pack(fill="x")
-    status = ttk.Label(foot, anchor="w")
+    status = ttk.Label(foot, anchor="w", style="Muted.TLabel")
 
     def btn(parent, text, cmd):
         b = ttk.Button(parent, text=text, command=cmd, style="Tool.TButton", width=len(text) + 1)
@@ -196,7 +198,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         r = page_rect()
         x0, y0 = to_canvas(0, 0)
         x1, y1 = to_canvas(r.width, r.height)
-        canvas.create_rectangle(x0 + 3, y0 + 3, x1 + 3, y1 + 3, fill="#c4c8cf", outline="")
+        canvas.create_rectangle(x0 + 3, y0 + 3, x1 + 3, y1 + 3, fill="#000000" if pal.dark else "#c4c8cf", outline="")
         canvas.create_image(x0, y0, image=state["bg"], anchor="nw")
         for s in current():
             a, b = to_canvas(*s.rect[:2])
@@ -255,7 +257,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
 
     def add_text(text=None, size=14):
         if text is None:
-            text = simpledialog.askstring(APP_NAME, "Eklenecek yazı (alt satır için \\n):", parent=root)
+            text = _dialog("Eklenecek yazı (alt satır için \\n):", parent=root)
             if not text or not text.strip():
                 return
             text = text.replace("\\n", "\n")
@@ -295,7 +297,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             redraw()
 
     def edit_text(s):
-        t = simpledialog.askstring(APP_NAME, "Yazı:", initialvalue=s.text.replace("\n", "\\n"), parent=root)
+        t = _dialog("Yazı:", s.text.replace("\n", "\\n"), parent=root)
         if t and t.strip():
             snapshot()
             t = t.replace("\\n", "\n")
@@ -442,7 +444,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     pg_lbl.pack(side="left")
     ttk.Button(nav, text="▶", width=3, command=lambda: go(1), style="Tool.TButton").pack(side="left")
 
-    ttk.Button(foot, text="Kaydet", command=save, style="Save.TButton").pack(side="right", padx=(6, 0))
+    ttk.Button(foot, text="Kaydet", command=save, style="Accent.TButton", width=12).pack(side="right", padx=(6, 0))
     open_btn = ttk.Button(foot, text="Klasörü aç", command=open_folder, state="disabled", style="Tool.TButton")
     open_btn.pack(side="right", padx=2)
     status.pack(side="left", fill="x", expand=True)

@@ -70,17 +70,6 @@ WIN_BASE = r"Software\Classes\SystemFileAssociations\.{ext}\shell\Riffle"
 # klasörün üstüne sağ tık (%1) ve klasörün içinde boş alana sağ tık (%V)
 WIN_FOLDER_BASES = [(r"Software\Classes\Directory\shell\Riffle", "%1"),
                     (r"Software\Classes\Directory\Background\shell\Riffle", "%V")]
-# 0.7.0 öncesi adla (Pratik Çevirici) yazılmış menüler: kurarken ve kaldırırken silinir, iki menü kalmasın
-LEGACY_WIN_BASE = WIN_BASE.replace("\\Riffle", "\\PratikCevirici")
-LEGACY_FOLDER_BASES = [b.replace("\\Riffle", "\\PratikCevirici") for b, _ in WIN_FOLDER_BASES]
-
-
-def _remove_legacy_windows(winreg, HK) -> None:
-    for ext in all_extensions():
-        for k in _win_cascade_keys(LEGACY_WIN_BASE.format(ext=ext)):
-            _win_delete_tree(HK, k)
-    for b in LEGACY_FOLDER_BASES:
-        _win_delete_tree(HK, b)
 
 
 def _win_delete_tree(root, path: str) -> None:
@@ -157,6 +146,13 @@ def _win_item(winreg, HK, key: str, action, prefix, arg: str = "%1") -> None:
         winreg.SetValueEx(k, "", 0, winreg.REG_SZ, f'{prefix} {action.id} "{arg}"')
 
 
+def _win_icon(winreg, key) -> None:
+    """Sağ tık menüsünde 'Riffle' satırının yanında simge."""
+    from riffle.theme import ICON_ICO
+    if ICON_ICO.exists():
+        winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, str(ICON_ICO))
+
+
 def _install_folder_menus(winreg, HK, prefix) -> None:
     acts = [a for node in menu_tree(FOLDER) for a in node[1]]
     for base, arg in WIN_FOLDER_BASES:
@@ -166,6 +162,7 @@ def _install_folder_menus(winreg, HK, prefix) -> None:
         with winreg.CreateKey(HK, base) as k:
             winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, APP_NAME)
             winreg.SetValueEx(k, "SubCommands", 0, winreg.REG_SZ, "")
+            _win_icon(winreg, k)
         for i, action in enumerate(acts):
             _win_item(winreg, HK, f"{base}\\shell\\{i:02d}_{action.id}", action, prefix, arg)
 
@@ -235,7 +232,6 @@ def install_windows() -> None:
     import winreg
     pyw = command_prefix(gui=True)
     HK = winreg.HKEY_CURRENT_USER
-    _remove_legacy_windows(winreg, HK)
     for ext in all_extensions():
         keys = _win_cascade_keys(WIN_BASE.format(ext=ext))
         for k in keys:
@@ -243,6 +239,7 @@ def install_windows() -> None:
         for base, (title, tree) in zip(keys, win_cascades(ext)):
             with winreg.CreateKey(HK, base) as k:
                 winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, title)
+                _win_icon(winreg, k)
                 winreg.SetValueEx(k, "SubCommands", 0, winreg.REG_SZ, "")
                 winreg.SetValueEx(k, "MultiSelectModel", 0, winreg.REG_SZ, "Player")
             for gi, (group, acts) in enumerate(tree):
@@ -271,7 +268,6 @@ def uninstall_windows() -> None:
             _win_delete_tree(winreg.HKEY_CURRENT_USER, k)
     for base, _ in WIN_FOLDER_BASES:
         _win_delete_tree(winreg.HKEY_CURRENT_USER, base)
-    _remove_legacy_windows(winreg, winreg.HKEY_CURRENT_USER)
     _win_refresh_shell()
     print("✔ Windows sağ tık menüsü kaldırıldı.")
 
@@ -286,9 +282,8 @@ NEMO_DIR = Path.home() / ".local" / "share" / "nemo" / "actions"
 def install_linux() -> None:
     NEMO_DIR.mkdir(parents=True, exist_ok=True)
     prefix = command_prefix(gui=False)
-    for pattern in ("riffle_*.nemo_action", "pratik_*.nemo_action"):   # eski ad dahil
-        for old in NEMO_DIR.glob(pattern):
-            old.unlink()
+    for old in NEMO_DIR.glob("riffle_*.nemo_action"):
+        old.unlink()
     hidden, favs = _menu_prefs()
     for action in ACTIONS:
         if action.id in hidden:
@@ -317,9 +312,8 @@ def install_linux() -> None:
 
 
 def uninstall_linux() -> None:
-    for pattern in ("riffle_*.nemo_action", "pratik_*.nemo_action"):
-        for f in NEMO_DIR.glob(pattern):
-            f.unlink()
+    for f in NEMO_DIR.glob("riffle_*.nemo_action"):
+        f.unlink()
     print("✔ Nemo eylemleri kaldırıldı.")
 
 
