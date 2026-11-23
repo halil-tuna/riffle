@@ -1,0 +1,59 @@
+name: Windows kurulum dosyası
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    continue-on-error: true          # testler bilgi amaçlı; paketlemeyi durdurmaz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q tests --ignore=tests/test_ui.py
+
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kütüphaneler
+        run: pip install -r requirements.txt pyinstaller
+      - name: Paketle (PyInstaller)
+        run: python packaging/build_exe.py
+      - name: Paketi dene
+        shell: pwsh
+        run: |
+          $exe = "dist\Riffle\Riffle.exe"
+          python -c "import pymupdf; d=pymupdf.open(); p=d.new_page(); p.insert_text((72,72),'Deneme 123'); d.save('deneme.pdf')"
+          $env:RIFFLE_AUTOCLOSE_MS = '1500'
+          Start-Process $exe -ArgumentList 'compress', "`"$PWD\deneme.pdf`"" -Wait
+          Start-Process $exe -ArgumentList 'pdf2word', "`"$PWD\deneme.pdf`"" -Wait
+          if (-not (Test-Path 'deneme_sikistirilmis.pdf')) { throw "paket: sıkıştırma çalışmadı" }
+          if (-not (Test-Path 'deneme.docx')) { throw "paket: PDF→Word çalışmadı" }
+          Get-ChildItem deneme*
+      - name: Kurulum dosyası (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          $ver = python -c "import riffle; print(riffle.__version__)"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$ver" packaging\installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Riffle-kurulum
+          path: dist/Riffle-*-kurulum.exe
+      - name: Sürüme ekle
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Riffle-*-kurulum.exe

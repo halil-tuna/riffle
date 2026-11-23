@@ -1,0 +1,457 @@
+"""İmza / yazı / görsel ekleme penceresi (tkinter).
+
+  - ✍ İmzam: kayıtlı imzayı sayfaya koyar (ilk seferde çiz ya da fotoğraftan yükle)
+  - 🖼 Görsel: logo, kaşe, fotoğraf · T Yazı · 📅 Tarih
+  - Sürükle: taşı · sağ alt kare: büyüt/küçült · çift tık (yazı): düzenle · Del: sil
+  - Her sayfaya: seçili öğeyi her sayfaya kopyalar (logo, antet, paraf için)
+Kısayollar: PageUp/PageDown sayfa · ok tuşları kaydır · Ctrl+I imzam · Ctrl+D tarih ·
+            Ctrl+G tüm sayfalara · Ctrl+S kaydet · Ctrl+Z geri al
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import os
+import sys
+from pathlib import Path
+
+from . import APP_NAME
+from . import stamp_model as sm
+from .actions import open_pdf, pymupdf
+
+COLORS = {"Lacivert": (0.05, 0.1, 0.4), "Siyah": (0, 0, 0), "Mavi": (0.1, 0.3, 0.85), "Kırmızı": (0.75, 0.05, 0.05)}
+HANDLE = 9
+SEL = "#2f6fdd"
+
+
+def _hex(c):
+    return "#%02x%02x%02x" % tuple(int(v * 255) for v in c)
+
+
+def _ui_font():
+    return "Arial" if sys.platform == "win32" else "DejaVu Sans"
+
+
+def signature_dialog(parent):
+    """İmza çiz ya da fotoğraftan yükle. PNG baytlarını döndürür (iptal → None)."""
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+    W, H = 600, 220
+    top = tk.Toplevel(parent)
+    top.title(f"{APP_NAME} — İmza")
+    top.transient(parent)
+    top.resizable(False, False)
+    ttk.Label(top, text="Fareyle (ya da dokunmatik kalemle) imzanı at, veya beyaz kâğıda attığın "
+                        "imzanın fotoğrafını yükle.", padding=(10, 8)).pack(anchor="w")
+    cv = tk.Canvas(top, width=W, height=H, background="white", highlightthickness=1,
+                   highlightbackground="#b8bec8", cursor="pencil")
+    cv.pack(padx=10)
+    cv.create_line(30, H - 50, W - 30, H - 50, fill="#d6dae0", dash=(4, 3))
+    strokes: list[list] = []
+    result = {"png": None}
+
+    def down(e):
+        strokes.append([(e.x, e.y)])
+        cv.create_oval(e.x - 2, e.y - 2, e.x + 2, e.y + 2, fill="#10205f", outline="", tags="ink")
+
+    def move(e):
+        if strokes:
+            x0, y0 = strokes[-1][-1]
+            strokes[-1].append((e.x, e.y))
+            cv.create_line(x0, y0, e.x, e.y, fill="#10205f", width=4, capstyle="round", smooth=True, tags="ink")
+
+    def clear():
+        strokes.clear()
+        cv.delete("ink")
+
+    def load():
+        f = filedialog.askopenfilename(parent=top, title="İmza fotoğrafı",
+                                       filetypes=[("Görseller", "*.png *.jpg *.jpeg *.heic *.bmp *.webp"),
+                                                  ("Tümü", "*.*")])
+        if not f:
+            return
+        try:
+            src = sm.image_bytes(Path(f))
+            result["png"] = sm.clean_signature(io.BytesIO(src))
+        except Exception as e:
+            messagebox.showerror(APP_NAME, str(e), parent=top)
+            return
+        top.destroy()
+
+    def ok():
+        if not strokes:
+            messagebox.showinfo(APP_NAME, "Önce imzanı çiz ya da fotoğraf yükle.", parent=top)
+            return
+        result["png"] = sm.strokes_to_png(strokes, (W, H))
+        top.destroy()
+
+    cv.bind("<ButtonPress-1>", down)
+    cv.bind("<B1-Motion>", move)
+    row = ttk.Frame(top, padding=10)
+    row.pack(fill="x")
+    ttk.Button(row, text="Temizle", command=clear).pack(side="left")
+    ttk.Button(row, text="Fotoğraftan yükle…", command=load).pack(side="left", padx=6)
+    ttk.Button(row, text="Tamam", command=ok).pack(side="right")
+    ttk.Button(row, text="İptal", command=top.destroy).pack(side="right", padx=6)
+    top.bind("<Return>", lambda e: ok())
+    top.bind("<Escape>", lambda e: top.destroy())
+    top.grab_set()
+    cv.focus_set()
+    parent.wait_window(top)
+    return result["png"]
+
+
+def run(paths: list[Path], progress=print) -> list[Path]:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, simpledialog, ttk
+
+    src = Path(paths[0])
+    doc = open_pdf(src)
+
+    root = tk.Tk()
+    root.title(f"{APP_NAME} — İmza / yazı / görsel ekle — {src.name}")
+    root.geometry(f"{min(1000, root.winfo_screenwidth() - 60)}x{min(860, root.winfo_screenheight() - 80)}")
+    root.minsize(560, 480)
+    try:
+        ttk.Style().theme_use("vista" if sys.platform == "win32" else "clam")
+    except tk.TclError:
+        pass
+    style = ttk.Style()
+    style.configure("Tool.TButton", padding=(6, 2))
+    style.configure("Save.TButton", padding=(14, 4), font=("Segoe UI", 10, "bold"))
+
+    stamps: list[sm.Stamp] = []
+    history: list[list] = []
+    state = {"page": 0, "zoom": 1.0, "ox": 0, "oy": 0, "sel": None, "drag": None, "bg": None}
+    imgs: dict = {}                   # tk görsellerini çöp toplayıcıdan koru
+    saved: list[Path] = []
+    sig_cache = {"png": sm.signature_path().read_bytes() if sm.signature_path().exists() else None}
+
+    bar = ttk.Frame(root, padding=(8, 6))
+    bar.pack(fill="x")
+    canvas = tk.Canvas(root, background="#e6e8ec", highlightthickness=0)
+    canvas.pack(fill="both", expand=True)
+    foot = ttk.Frame(root, padding=(8, 6))
+    foot.pack(fill="x")
+    status = ttk.Label(foot, anchor="w")
+
+    def btn(parent, text, cmd):
+        b = ttk.Button(parent, text=text, command=cmd, style="Tool.TButton", width=len(text) + 1)
+        b.pack(side="left", padx=1)
+        return b
+
+    # ------------------------------------------------------------------ koordinat
+    def page_rect():
+        return doc[state["page"]].rect
+
+    def to_canvas(x, y):
+        return state["ox"] + x * state["zoom"], state["oy"] + y * state["zoom"]
+
+    def to_page(cx, cy):
+        return (cx - state["ox"]) / state["zoom"], (cy - state["oy"]) / state["zoom"]
+
+    def current():
+        return [s for s in stamps if s.page == state["page"]]
+
+    def selected():
+        return next((s for s in stamps if s.uid == state["sel"]), None)
+
+    def snapshot():
+        import copy
+        history.append(copy.deepcopy(stamps))
+        del history[:-60]
+
+    def undo():
+        if history:
+            stamps[:] = history.pop()
+            state["sel"] = None
+            redraw()
+
+    # ------------------------------------------------------------------ çizim
+    def render_page():
+        cw, ch = max(canvas.winfo_width(), 200), max(canvas.winfo_height(), 200)
+        r = page_rect()
+        z = min((cw - 40) / r.width, (ch - 30) / r.height)
+        state["zoom"] = max(z, 0.1)
+        state["ox"] = (cw - r.width * state["zoom"]) / 2
+        state["oy"] = 15
+        pix = doc[state["page"]].get_pixmap(matrix=pymupdf.Matrix(state["zoom"], state["zoom"]), alpha=False)
+        state["bg"] = tk.PhotoImage(data=base64.b64encode(pix.tobytes("png")))
+
+    def item_image(s: sm.Stamp, w: int, h: int):
+        key = (s.uid, w, h)
+        if key not in imgs:
+            from PIL import Image
+            im = Image.open(io.BytesIO(s.data)).convert("RGBA").resize((max(w, 1), max(h, 1)), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, "PNG")
+            imgs[key] = tk.PhotoImage(data=base64.b64encode(buf.getvalue()))
+        return imgs[key]
+
+    def redraw(rerender=False):
+        if rerender or state["bg"] is None:
+            render_page()
+        canvas.delete("all")
+        r = page_rect()
+        x0, y0 = to_canvas(0, 0)
+        x1, y1 = to_canvas(r.width, r.height)
+        canvas.create_rectangle(x0 + 3, y0 + 3, x1 + 3, y1 + 3, fill="#c4c8cf", outline="")
+        canvas.create_image(x0, y0, image=state["bg"], anchor="nw")
+        for s in current():
+            a, b = to_canvas(*s.rect[:2])
+            c, d = to_canvas(*s.rect[2:])
+            if s.kind == "image":
+                canvas.create_image(a, b, image=item_image(s, int(c - a), int(d - b)), anchor="nw",
+                                    tags=("item", f"u{s.uid}"))
+            else:
+                px = s.fontsize() * state["zoom"]
+                canvas.create_text(a + 1, b, text=s.text, anchor="nw", fill=_hex(s.color),
+                                   font=(_ui_font(), -max(int(px), 4)), tags=("item", f"u{s.uid}"))
+            if s.uid == state["sel"]:
+                canvas.create_rectangle(a, b, c, d, outline=SEL, dash=(4, 2), width=1.5)
+                canvas.create_rectangle(c - HANDLE, d - HANDLE, c + 2, d + 2, fill=SEL, outline="white")
+        pg_lbl.configure(text=f"Sayfa {state['page'] + 1} / {len(doc)}")
+        n = len(stamps)
+        status.configure(text=(f"{n} öğe eklendi · sürükle: taşı · köşe: boyut · çift tık: yazıyı düzenle"
+                               if n else "Araç çubuğundan imza, görsel ya da yazı ekle."))
+
+    # ------------------------------------------------------------------ ekleme
+    def add(stamp: sm.Stamp):
+        snapshot()
+        stamps.append(stamp)
+        state["sel"] = stamp.uid
+        redraw()
+        return stamp
+
+    def add_image(data: bytes, width=160):
+        return add(sm.Stamp("image", state["page"], sm.place_image(data, page_rect(), width=width), data=data))
+
+    def my_signature():
+        if not sig_cache["png"]:
+            png = signature_dialog(root)
+            if not png:
+                return
+            sm.signature_path().write_bytes(png)
+            sig_cache["png"] = png
+        add_image(sig_cache["png"], width=150)
+
+    def new_signature():
+        png = signature_dialog(root)
+        if png:
+            sm.signature_path().write_bytes(png)
+            sig_cache["png"] = png
+            add_image(png, width=150)
+
+    def add_picture():
+        f = filedialog.askopenfilename(parent=root, title="Görsel / logo / kaşe seç",
+                                       filetypes=[("Görseller", "*.png *.jpg *.jpeg *.heic *.heif *.bmp *.webp *.gif"),
+                                                  ("Tümü", "*.*")])
+        if f:
+            try:
+                add_image(sm.image_bytes(Path(f)), width=140)
+            except Exception as e:
+                messagebox.showerror(APP_NAME, str(e), parent=root)
+
+    def add_text(text=None, size=14):
+        if text is None:
+            text = simpledialog.askstring(APP_NAME, "Eklenecek yazı (alt satır için \\n):", parent=root)
+            if not text or not text.strip():
+                return
+            text = text.replace("\\n", "\n")
+        r = page_rect()
+        rect = sm.text_rect(text, (r.width * 0.12, r.height * 0.82), size)
+        return add(sm.Stamp("text", state["page"], sm.clamp(rect, r), text=text, color=COLORS[color.get()]))
+
+    def add_date():
+        add_text(sm.today_text(), 12)
+
+    def delete():
+        s = selected()
+        if s:
+            snapshot()
+            stamps.remove(s)
+            state["sel"] = None
+            redraw()
+
+    def all_pages():
+        s = selected()
+        if not s:
+            messagebox.showinfo(APP_NAME, "Önce bir öğe seç.", parent=root)
+            return
+        snapshot()
+        others = [x for x in range(len(doc)) if x != s.page]
+        for c in sm.copy_to_pages(s, others):
+            c.rect = sm.clamp(c.rect, doc[c.page].rect)
+            stamps.append(c)
+        status.configure(text=f"Seçili öğe {len(others)} sayfaya daha kopyalandı.")
+        redraw()
+
+    def set_color(*_):
+        s = selected()
+        if s and s.kind == "text":
+            snapshot()
+            s.color = COLORS[color.get()]
+            redraw()
+
+    def edit_text(s):
+        t = simpledialog.askstring(APP_NAME, "Yazı:", initialvalue=s.text.replace("\n", "\\n"), parent=root)
+        if t and t.strip():
+            snapshot()
+            t = t.replace("\\n", "\n")
+            fs = s.fontsize()
+            s.text = t
+            s.rect = sm.clamp(sm.text_rect(t, s.rect[:2], fs), page_rect())
+            redraw()
+
+    # ------------------------------------------------------------------ sayfa
+    def go(delta):
+        p = min(max(state["page"] + delta, 0), len(doc) - 1)
+        if p != state["page"]:
+            state["page"] = p
+            state["sel"] = None
+            redraw(rerender=True)
+
+    # ------------------------------------------------------------------ kaydet
+    def save():
+        if not stamps:
+            messagebox.showinfo(APP_NAME, "Eklenmiş öğe yok.", parent=root)
+            return
+        status.configure(text="Kaydediliyor…")
+        root.update_idletasks()
+        try:
+            out = sm.apply(src, stamps)
+        except Exception as e:
+            messagebox.showerror(APP_NAME, str(e), parent=root)
+            return
+        saved.append(out)
+        print("Tamamlandı:", out.name)
+        sys.stdout.flush()
+        status.configure(text=f"✔ Kaydedildi: {out.name}  →  {out.parent}")
+        open_btn.configure(state="normal")
+
+    def open_folder():
+        if saved:
+            from .ui import open_folder as of
+            of(saved[-1])
+
+    # ------------------------------------------------------------------ fare
+    def hit(cx, cy):
+        x, y = to_page(cx, cy)
+        tol = HANDLE / state["zoom"]
+        for s in reversed(current()):
+            x0, y0, x1, y1 = s.rect
+            if s.uid == state["sel"] and abs(x - x1) <= tol and abs(y - y1) <= tol:
+                return s, "resize"
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                return s, "move"
+        return None, None
+
+    def on_press(e):
+        canvas.focus_set()
+        s, mode = hit(e.x, e.y)
+        state["sel"] = s.uid if s else None
+        if s:
+            snapshot()
+            state["drag"] = (mode, s, to_page(e.x, e.y), s.rect, False)
+        else:
+            state["drag"] = None
+        redraw()
+
+    def on_motion(e):
+        if not state["drag"]:
+            s, mode = hit(e.x, e.y)
+            canvas.configure(cursor="sizing" if mode == "resize" else "fleur" if mode else "")
+            return
+        mode, s, (sx, sy), r0, _ = state["drag"]
+        x, y = to_page(e.x, e.y)
+        dx, dy = x - sx, y - sy
+        x0, y0, x1, y1 = r0
+        if mode == "move":
+            s.rect = sm.clamp((x0 + dx, y0 + dy, x1 + dx, y1 + dy), page_rect())
+        else:
+            w = max(12.0, x1 - x0 + dx)
+            h = w / max(s.aspect, 1e-6)          # en-boy oranı korunur (yazıda punto da büyür)
+            r = page_rect()
+            w, h = min(w, r.width - x0), min(h, r.height - y0)
+            s.rect = (x0, y0, x0 + w, y0 + h)
+        state["drag"] = (mode, s, (sx, sy), r0, True)
+        redraw()
+
+    def on_release(e):
+        if state["drag"] and not state["drag"][4]:
+            history.pop()                       # yalnızca tıklandı: geri al geçmişini kirletme
+        state["drag"] = None
+
+    def on_double(e):
+        s, _ = hit(e.x, e.y)
+        if s and s.kind == "text":
+            edit_text(s)
+
+    def nudge(dx, dy):
+        s = selected()
+        if s:
+            x0, y0, x1, y1 = s.rect
+            s.rect = sm.clamp((x0 + dx, y0 + dy, x1 + dx, y1 + dy), page_rect())
+            redraw()
+
+    canvas.bind("<ButtonPress-1>", on_press)
+    canvas.bind("<B1-Motion>", on_motion)
+    canvas.bind("<Motion>", on_motion)
+    canvas.bind("<ButtonRelease-1>", on_release)
+    canvas.bind("<Double-Button-1>", on_double)
+    canvas.bind("<Configure>", lambda e: redraw(rerender=True))
+
+    def key(seq, fn):
+        root.bind(seq, lambda e: (fn(), "break")[1])
+
+    key("<Delete>", delete)
+    key("<BackSpace>", delete)
+    key("<Control-z>", undo)
+    key("<Control-s>", save)
+    key("<Prior>", lambda: go(-1))
+    key("<Next>", lambda: go(1))
+    key("<Left>", lambda: nudge(-2, 0))
+    key("<Right>", lambda: nudge(2, 0))
+    key("<Up>", lambda: nudge(0, -2))
+    key("<Down>", lambda: nudge(0, 2))
+    key("<Escape>", lambda: (state.update(sel=None), redraw()))
+    key("<Control-i>", my_signature)
+    key("<Control-d>", add_date)
+    key("<Control-g>", all_pages)
+
+    # ------------------------------------------------------------------ araç çubuğu
+    btn(bar, "✍ İmzam", my_signature)
+    btn(bar, "Yeni imza", new_signature)
+    ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
+    btn(bar, "🖼 Görsel", add_picture)
+    btn(bar, "T Yazı", add_text)
+    btn(bar, "Tarih", add_date)
+    color = tk.StringVar(value="Lacivert")
+    cb = ttk.Combobox(bar, textvariable=color, values=list(COLORS), state="readonly", width=9)
+    cb.pack(side="left", padx=4)
+    cb.bind("<<ComboboxSelected>>", set_color)
+    ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
+    btn(bar, "Her sayfaya", all_pages)
+    btn(bar, "Sil", delete)
+    btn(bar, "↶", undo)
+    nav = ttk.Frame(foot)                       # sayfa gezinmesi alt çubukta: dar pencerede de görünür
+    nav.pack(side="left", padx=(0, 10))
+    ttk.Button(nav, text="◀", width=3, command=lambda: go(-1), style="Tool.TButton").pack(side="left")
+    pg_lbl = ttk.Label(nav, width=12, anchor="center")
+    pg_lbl.pack(side="left")
+    ttk.Button(nav, text="▶", width=3, command=lambda: go(1), style="Tool.TButton").pack(side="left")
+
+    ttk.Button(foot, text="Kaydet", command=save, style="Save.TButton").pack(side="right", padx=(6, 0))
+    open_btn = ttk.Button(foot, text="Klasörü aç", command=open_folder, state="disabled", style="Tool.TButton")
+    open_btn.pack(side="right", padx=2)
+    status.pack(side="left", fill="x", expand=True)
+
+
+    root.after(80, lambda: redraw(rerender=True))
+    auto = os.environ.get("RIFFLE_AUTOCLOSE_MS")
+    if auto:
+        root.after(int(auto), root.destroy)
+    root.mainloop()
+    doc.close()
+    return saved
