@@ -344,3 +344,14 @@ def test_output_to_folder_setting(cfg, tmp_path, pdf):
     assert r.returncode == 0, r.stdout + r.stderr
     assert list(target.glob("*_sikistirilmis.pdf"))
     assert not list(pdf.parent.glob("*_sikistirilmis.pdf"))
+
+
+def test_installer_script_files_exist():
+    """Inno Setup betiğinin derleme anında okuduğu dosyalar depoda var mı (simge, lisans)."""
+    import re
+    iss = ROOT / "packaging" / "installer.iss"
+    for key in ("SetupIconFile", "LicenseFile"):
+        m = re.search(rf"^{key}=(.+)$", iss.read_text(encoding="utf-8"), re.M)
+        assert m, key
+        path = (iss.parent / m.group(1).strip().replace("\\", "/")).resolve()
+        assert path.exists(), f"{key}: {path}"
