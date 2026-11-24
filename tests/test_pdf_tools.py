@@ -209,7 +209,7 @@ def test_merge_keeps_chosen_order(tmp_path):
 
 def test_order_actions_registered():
     from riffle.actions import ACTIONS
-    assert {a.id for a in ACTIONS if a.order} == {"merge", "img2pdf", "photo2doc", "compare", "organize"}
+    assert {a.id for a in ACTIONS if a.order} == {"merge", "img2pdf", "photo2doc", "compare", "organize", "wordmerge"}
     assert next(a for a in ACTIONS if a.id == "organize").quick is not None
 
 

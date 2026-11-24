@@ -21,6 +21,7 @@ DEFAULTS = {
     "output_dir": "",
     "parallel": True,         # çok dosyada işlemciyi tam kullan
     "theme": "system",        # system | light | dark
+    "check_updates": True,    # haftada bir GitHub'da yeni sürüm var mı
 }
 FAV_AUTO = 3
 FAV_MIN_USES = 3
@@ -250,6 +251,31 @@ def run(paths=None, progress=print, **_) -> list:
     ttk.Checkbutton(gen, text="Çok dosya seçince işlemcinin bütün çekirdeklerini kullan (daha hızlı)",
                     variable=par).pack(anchor="w")
     ttk.Separator(gen).pack(fill="x", pady=14)
+    from . import __version__, update
+    ttk.Label(gen, text=f"Güncellemeler · şu anki sürüm {__version__}", style="Strong.TLabel").pack(
+        anchor="w", pady=(0, 4))
+    upd = tk.BooleanVar(value=s.get("check_updates", True))
+    ttk.Checkbutton(gen, text="Haftada bir yeni sürüm var mı diye bak (yalnızca sürüm numarası sorulur)",
+                    variable=upd).pack(anchor="w")
+    urow = ttk.Frame(gen)
+    urow.pack(anchor="w", pady=(6, 0))
+    uinfo = ttk.Label(urow, style="Muted.TLabel")
+
+    def check_now():
+        uinfo.configure(text="Bakılıyor…", foreground="")
+        root.update_idletasks()
+        latest = update.fetch()
+        if latest is None:
+            uinfo.configure(text="GitHub'a ulaşılamadı (internet bağlantısı?)")
+        elif update._ver(latest) > update._ver(__version__):
+            uinfo.configure(text=f"Yeni sürüm var: {latest} — indirmek için tıkla", foreground=pal.accent,
+                            cursor="hand2")
+            uinfo.bind("<Button-1>", lambda e: update.open_download())
+        else:
+            uinfo.configure(text="Güncel sürümü kullanıyorsun.")
+    ttk.Button(urow, text="Şimdi denetle", command=check_now).pack(side="left")
+    uinfo.pack(side="left", padx=10)
+    ttk.Separator(gen).pack(fill="x", pady=14)
 
     def reset_use():
         _write("kullanim.json", {})
@@ -268,6 +294,7 @@ def run(paths=None, progress=print, **_) -> list:
         s["output"] = out.get()
         s["output_dir"] = out_dir.get()
         s["parallel"] = par.get()
+        s["check_updates"] = upd.get()
         s["theme"] = look.get()
         if s["output"] == "folder" and not Path(s["output_dir"]).is_dir():
             messagebox.showerror(APP_NAME, "Seçilen çıktı klasörü bulunamadı.", parent=root)

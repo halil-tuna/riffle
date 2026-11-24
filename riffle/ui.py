@@ -150,7 +150,7 @@ def _describe(p: Path) -> str:
     return info
 
 
-def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam"):
+def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam", allow_pages: bool = True):
     """Dosya sırasını seçtiren küçük pencere (sayfa açmaz, anında gelir).
 
     Döndürür: ("ok", sıralı liste) · ("organize", sıralı liste) = sayfa düzenleyicide aç · İptal: None
@@ -276,7 +276,9 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam"):
 
     foot = ttk.Frame(frm, padding=(0, 14, 0, 0))
     foot.pack(fill="x")
-    ttk.Button(foot, text="Sayfa sayfa düzenle…", command=lambda: done(("organize", list(items)))).pack(side="left")
+    if allow_pages:
+        ttk.Button(foot, text="Sayfa sayfa düzenle…",
+                   command=lambda: done(("organize", list(items)))).pack(side="left")
     ok_btn = ttk.Button(foot, text=ok_text, style="Accent.TButton", width=12,
                         command=lambda: done(("ok", list(items))))
     ok_btn.pack(side="right")
@@ -306,8 +308,14 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam"):
 def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[list[Path], list[str]]],
                     cancel: threading.Event | None = None) -> None:
     """job(progress) -> (çıktılar, hatalar). Pencerede ilerleme gösterir; cancel verilirse İptal düğmesi."""
+    clip_prefix = "\x00clip:"
     if not HAS_TK:
-        outputs, errors = job(lambda m: print("·", m))
+        def cli_progress(m):
+            if m.startswith(clip_prefix):
+                print(m[len(clip_prefix):])         # panonun yerine: metni ekrana yaz
+            else:
+                print("·", m)
+        outputs, errors = job(cli_progress)
         if errors:
             notify("Hata", "\n".join(errors))
         if outputs:
@@ -315,6 +323,8 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
         return
 
     q: queue.Queue = queue.Queue()
+    clip: dict = {"text": None}          # görseldeki yazı vb.: iş bitince panoya
+    newer: dict = {"v": None}            # GitHub'da daha yeni sürüm (arka planda denetlenir)
     notes: list[str] = []  # "ℹ " ile başlayan mesajlar sonuç ekranında da kalır
     from . import theme
     root = tk.Tk()
@@ -405,12 +415,26 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
             ttk.Label(result_box, text=f"•  {p.name}", wraplength=460).pack(anchor="w", pady=1)
         if len(outputs) > 8:
             ttk.Label(result_box, text=f"… ve {len(outputs) - 8} dosya daha", style="Muted.TLabel").pack(anchor="w")
+        if clip["text"]:
+            try:
+                root.clipboard_clear()
+                root.clipboard_append(clip["text"])
+                root.update()
+                notes.insert(0, "Metin panoya kopyalandı: istediğin yere Ctrl+V ile yapıştır.")
+            except tk.TclError:
+                pass
         if notes:
             ttk.Label(result_box, text="\n".join(notes), style="Muted.TLabel", wraplength=460,
                       justify="left").pack(anchor="w", pady=(8, 0))
         for e in errors:
             ttk.Label(result_box, text=e, foreground=pal.danger, wraplength=460,
                       justify="left").pack(anchor="w", pady=(6, 0))
+        if newer["v"]:
+            from . import update
+            link = ttk.Label(result_box, text=f"↑  Yeni sürüm var: Riffle {newer['v']} — indirmek için tıkla",
+                             foreground=pal.accent, cursor="hand2")
+            link.pack(anchor="w", pady=(10, 0))
+            link.bind("<Button-1>", lambda e: update.open_download())
         if outputs:
             ttk.Button(buttons, text="Klasörü aç", style="Accent.TButton",
                        command=lambda: (open_folder(outputs[0]), root.destroy())).pack(side="right")
@@ -429,6 +453,9 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
             while True:
                 kind, payload = q.get_nowait()
                 if kind == "msg":
+                    if payload.startswith(clip_prefix):
+                        clip["text"] = payload[len(clip_prefix):]
+                        continue
                     if payload.startswith("ℹ "):
                         notes.append(payload[2:])
                     status.configure(text=payload)
@@ -439,6 +466,14 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
             pass
         root.after(80, poll)
 
+    def look_for_update():
+        try:
+            from . import update
+            newer["v"] = update.check()
+        except Exception:
+            pass
+
     threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=look_for_update, daemon=True).start()
     root.after(80, poll)
     root.mainloop()

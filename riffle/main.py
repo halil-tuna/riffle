@@ -91,8 +91,9 @@ def main(argv: list[str] | None = None) -> int:
     if action.order and len(paths) > 1:
         # önce küçük, hızlı dosya sırası penceresi; sayfalar ancak istenirse açılır
         from .actions import sorted_by_name
-        ok_text = "Birleştir" if action.quick or action.id == "merge" else "Tamam"
-        answer = ui.ask_order(sorted_by_name(paths), action.label, action.order, ok_text)
+        ok_text = "Birleştir" if action.quick or action.id in ("merge", "wordmerge") else "Tamam"
+        answer = ui.ask_order(sorted_by_name(paths), action.label, action.order, ok_text,
+                              allow_pages=action.id != "wordmerge")     # Word birleştirme PDF'e gitmesin
         if answer is None:
             return 1                     # İptal
         mode, paths = answer

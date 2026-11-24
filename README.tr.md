@@ -61,6 +61,29 @@ seçilir), **Kitapçık yap** (çift taraflı, kısa kenardan çevir, ortadan ka
 - **OCR:** gölgeli, soluk ya da telefonla çekilmiş sayfalarda görüntü önce temizlenir (ışık farkı, gürültü);
   temiz taramalarda ek süre yok. Deneme: gölgeli sayfada %84 → %100, soluk fotokopide %0 → %99 kelime.
 
+### Word, Excel ve PowerPoint araçları
+
+- **Küçült (içindeki resimleri sıkıştır):** .docx / .pptx / .xlsx içindeki fotoğraflar küçültülüp sıkıştırılır;
+  fotoğraflı sunumlar e-postaya ve OBS'ye sığar. Saydam resimler ve çizimler net kalır, dosya açılabilir mi
+  diye kaydetmeden önce denetlenir. Çıktı: `…_kucuk.pptx`.
+- **Word belgelerini birleştir (Word olarak):** grup ödevinde ayrı yazılmış bölümler sıra penceresinde dizilir
+  ve tek .docx olur; biçimler, resimler, numaralı listeler korunur, her belge yeni sayfadan başlar.
+- **CSV → Excel (karakterler, sayılar, tarihler düzgün):** kodlama (UTF-8, Türkçe ya da Batı Avrupa Windows)
+  ve ayırıcı (`;` `,` sekme) tanınır. Sayılar her iki yazımda da (`1.234,56` ve `1,234.56`) sayıya, tarihler
+  (`03.11.2026`, ABD'nin `12/25/2026`'sı) tarihe çevrilir; gün mü ay mı belli olmayan `03/11/2026` gibi
+  tarihler yanlış tarih üretmemek için metin kalır. TC kimlik, hesap no ve baştaki sıfırlı telefon numaraları
+  metin kalır. Başlık satırı kalın ve sabit, filtre açık.
+- **Not çıktısı (PowerPoint):** sayfada 3 slayt, yanlarında not satırları (A4); derste yazdırmak için.
+- **İçindeki resimleri çıkar:** Word / PowerPoint / Excel'deki resimler orijinal kalitede bir klasöre.
+
+### Görsel araçları
+
+- **Görseldeki yazıyı çıkar (OCR → panoya):** ekran görüntüsü, slayt, tahta ya da belge fotoğrafındaki yazı
+  okunur, panoya kopyalanır (Ctrl+V) ve yanına `.txt` olarak kaydedilir. Tesseract gerekir.
+- **Hedef boyuta indir:** "200 KB altına" gibi; başvuru formlarındaki fotoğraf/belge sınırları için en yüksek
+  kaliteyi arar, gerekirse çözünürlüğü düşürür.
+- **PNG'ye çevir · Sağa / sola döndür** (telefonun yön bilgisi dikkate alınır).
+
 ### Klasörde ara
 
 Klasöre sağ tık → **Klasörde ara (dosyaların içinde)…**. PDF, Word, PowerPoint, Excel ve metin dosyalarının
@@ -114,8 +137,10 @@ olarak sayfaları görüntüye çevirir (ve söyler). Hedefe inmek imkânsızsa 
 | Küçült / Onar | Sıkıştır (önerilen) · Çok sıkıştır (e-posta için) · 2 MB / 5 MB altına indir · Hedef boyuta indir… · Taramayı düzelt · Bozuk PDF'i onar |
 | Güvenlik | Şifre koy · Şifreyi kaldır · Kişisel bilgileri karart… |
 
-**Word / Excel / PowerPoint / ODT / RTF / TXT / CSV / HTML:** PDF'e çevir
-**Görseller (JPG, PNG, WEBP, BMP, TIFF, GIF, iPhone HEIC):** PDF'e çevir (çoklu seçim → tek PDF) · Fotoğraftan belge · JPG'ye çevir · Küçült (web/e-posta)
+**Word / Excel / PowerPoint / ODT / RTF / TXT / CSV / HTML:** PDF'e çevir · Küçült · Word belgelerini birleştir ·
+CSV → Excel · Not çıktısı · İçindeki resimleri çıkar
+**Görseller (JPG, PNG, WEBP, BMP, TIFF, GIF, iPhone HEIC):** PDF'e çevir (çoklu seçim → tek PDF) · Fotoğraftan belge ·
+Görseldeki yazıyı çıkar · JPG / PNG'ye çevir · Küçült · Hedef boyuta indir · Sağa / sola döndür
 **Klasörler:** Klasörü tek PDF yap (yer imli) · Klasörde ara
 **Her menünün sonunda:** Ayarlar…
 
@@ -127,6 +152,9 @@ Herhangi bir dosyaya sağ tık → **Ayarlar…** (ya da `python run.pyw --setti
 - **Menüyü sadeleştir:** kullanmadığın araçları gizle; istediklerini en üste sabitle. En çok kullandığın
   3 işlem (en az 3 kez) kendiliğinden menünün en üstüne çıkar.
 - **Çıktı yeri:** kaynağın yanına (varsayılan) · Masaüstüne · seçtiğin klasöre · her seferinde sor.
+- **Güncellemeler:** haftada bir GitHub'da yeni sürüm var mı diye bakılır (yalnızca sürüm numarası sorulur,
+  hiçbir dosya ya da bilgi gönderilmez); varsa iş bitince ekranında "Yeni sürüm var" bağlantısı çıkar.
+  Kapatılabilir; *Şimdi denetle* düğmesi de var.
 - **Paralel çalışma:** çok dosya seçince işlemcinin bütün çekirdekleri kullanılır; 30+ sayfalık PDF → Word
   sayfa parçalarına bölünüp paralel çevrilir (sonuç tek parça ile aynı).
 - İlerleme penceresinde **İptal** (ya da Esc): biten dosyalar kalır, yarım dosya bırakılmaz; çalışan
@@ -166,12 +194,12 @@ Program belgenin türünü kendisi anlar:
 
 ## Kurulum — Windows 11 (kolay yol: kurulum dosyası)
 
-GitHub'daki **Releases** sayfasından `Riffle-0.8.0-kurulum.exe`'yi indir, çalıştır (yönetici yetkisi
+GitHub'daki **Releases** sayfasından `Riffle-0.9.1-kurulum.exe`'yi indir, çalıştır (yönetici yetkisi
 istemez). Sağ tık menüsü kendiliğinden eklenir; kaldırınca menü de silinir. Kurulumun son ekranındaki
 bağlantılardan isteğe bağlı bileşenleri kur: LibreOffice (Office → PDF), Tesseract (OCR, *Turkish*'i işaretle),
 Ghostscript (PDF/A).
 
-Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v0.8.0` gibi bir etiket (tag) gönderince
+Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v0.9.1` gibi bir etiket (tag) gönderince
 `.github/workflows/windows-exe.yml` Windows'ta testleri çalıştırır, PyInstaller ile paketler, paketi gerçek bir
 PDF'le dener, Inno Setup ile `…-kurulum.exe` yapar ve sürüme ekler. Elle de çalıştırılabilir
 (Actions → *Windows kurulum dosyası* → *Run workflow*; çıktı *Artifacts* altında).
@@ -235,6 +263,9 @@ riffle/textfix.py       PDF metin onarımı (kayıp semboller, satır sonu tirel
 riffle/forms.py         form doldurma penceresi
 riffle/search.py        klasörde arama
 riffle/settings.py      ayarlar, sık kullanılanlar, çıktı yeri, görünüm
+riffle/officetools.py   Office küçültme, Word birleştirme, CSV → Excel, not çıktısı, Office resimleri
+riffle/imagetools.py    görseldeki yazı (OCR), hedef boyut, PNG, döndürme
+riffle/update.py        yeni sürüm bildirimi (GitHub Releases)
 riffle/theme.py         ortak görünüm: Windows 11 teması, açık/koyu mod, renkler, simge
 riffle/assets/          uygulama simgesi (pencere + sağ tık menüsü)
 riffle/parallel.py      paralel toplu işlem, büyük PDF → Word'ü parçalama, İptal
@@ -284,7 +315,7 @@ Kaynak kodu açık olduğu sürece kullanabilir, değiştirebilir, dağıtabilir
 Kullanılan bileşenler: PyMuPDF (AGPL-3.0, Artifex), pdf2docx (MIT; 0.5.8 öncesi GPL-3.0), Pillow (MIT-CMU),
 python-pptx (MIT), openpyxl (MIT), pillow-heif (BSD-3) / libheif (LGPL-3.0), pywin32 (PSF).
 opencv-python-headless (Apache-2.0), pymupdf4llm (AGPL-3.0), tkinterdnd2 (MIT), sv-ttk (MIT),
-darkdetect (BSD-3).
+darkdetect (BSD-3), docxcompose (MIT) / babel (BSD-3).
 Yazı tipi: Liberation Sans (SIL Open Font License 1.1, `riffle/fonts/OFL.txt`).
 Ayrı programlar: LibreOffice (MPL-2.0), Tesseract (Apache-2.0), Ghostscript (AGPL-3.0).
 Kapalı kaynak dağıtım istenirse: PyMuPDF yerine pypdfium2 (Apache/BSD) + pikepdf (MPL-2.0) ve

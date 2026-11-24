@@ -80,6 +80,7 @@ def main() -> int:
         "--add-data", f"{ROOT / 'riffle' / 'fonts'}{sep}riffle/fonts",   # gömülü yazı tipi (OFL)
         "--add-data", f"{ROOT / 'riffle' / 'assets'}{sep}riffle/assets",  # simge (pencere + sağ tık menüsü)
         "--collect-data", "sv_ttk",          # Windows 11 teması (Tcl + görseller)
+        "--collect-data", "docxcompose",     # Word birleştirmenin XML şablonları
         "--add-data", f"{ROOT / 'LICENSE'}{sep}.",
         "--add-data", f"{ROOT / 'README.md'}{sep}.",
         "--add-data", f"{ROOT / 'README.tr.md'}{sep}.",
@@ -118,6 +119,9 @@ def prune(out: Path) -> int:
     doomed += [d for d in internal.glob("tkinterdnd2/tkdnd/*")    # başka işletim sistemlerinin tkdnd'si
                if d.is_dir() and not d.name.startswith(tag)]
     doomed += internal.rglob("*.pyi")                           # tip ipuçları
+    # babel (docxcompose'un tarih biçimleri için): yalnızca Türkçe, İngilizce ve kök dil verisi kalsın
+    doomed += [f for f in internal.glob("babel/locale-data/*.dat")
+               if not f.name.split(".")[0].split("_")[0] in ("root", "tr", "en")]
     saved = 0
     for f in doomed:
         if not f.exists():

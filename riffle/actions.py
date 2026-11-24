@@ -35,6 +35,8 @@ OFFICE = ["doc", "docx", "odt", "rtf", "txt",
           "html", "htm"]
 IMAGES = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff", "gif", "heic", "heif"]
 FOLDER = "<klasör>"   # klasöre sağ tık işlemleri için sözde uzantı
+OOXML = ["docx", "pptx", "xlsx"]          # içi zip olan yeni Office biçimleri
+SLIDES = ["ppt", "pptx", "odp"]
 
 Progress = Callable[[str], None]
 
@@ -1160,6 +1162,13 @@ ACTIONS: list[Action] = [
            order="Hangisi eski? Üstteki eski sürüm, alttaki yeni sürüm sayılır"),
     # --- Office / görseller
     Action("office2pdf", "PDF'e çevir",                      OFFICE, office_to_pdf, batch=True),
+    Action("wordmerge",  "Word belgelerini birleştir (Word olarak)", ["docx"], _t("merge_word", "officetools"),
+           multi_only=True, batch=True, order="Birleştirme sırası (üstteki önce gelir)"),
+    Action("csv2xlsx",   "Excel'e çevir (karakterler, sayılar, tarihler düzgün)", ["csv"], _t("csv_to_excel", "officetools")),
+    Action("handout",    "Not çıktısı yap (sayfada 3 slayt + not satırları)", SLIDES,
+           _t("slide_handout", "officetools"), batch=True),
+    Action("officeshrink", "Küçült (içindeki resimleri sıkıştır)", OOXML, _t("compress_office", "officetools")),
+    Action("officeimg",  "İçindeki resimleri çıkar",         OOXML, _t("extract_office_images", "officetools")),
     Action("img2pdf",    "PDF'e çevir (tek dosya)",          IMAGES, images_to_pdf, batch=True,
            order="Sayfa sırası (üstteki ilk sayfa olur)"),
     Action("photo2doc",  "Fotoğraftan belge (taranmış PDF)", IMAGES, _t("photos_to_document"), batch=True,
@@ -1167,6 +1176,16 @@ ACTIONS: list[Action] = [
     Action("img2jpg",    "JPG'ye çevir",                     [e for e in IMAGES if e not in ("jpg", "jpeg")],
            _t("images_to_jpg")),
     Action("imgshrink",  "Küçült (web / e-posta için)",      IMAGES, _t("shrink_images")),
+    Action("imgtarget",  "Hedef boyuta indir… (ör. 200 KB)", IMAGES, _t("image_to_target", "imagetools"),
+           ask=("target", "Hedef boyut (KB; ör. 200 ya da 1.5mb):", "200")),
+    Action("imgocr",     "Görseldeki yazıyı çıkar (OCR → panoya)", IMAGES, _t("image_text", "imagetools"),
+           batch=True),
+    Action("img2png",    "PNG'ye çevir",                     [e for e in IMAGES if e != "png"],
+           _t("images_to_png", "imagetools")),
+    Action("imgrotr",    "Sağa döndür",                      IMAGES, _t("rotate_images", "imagetools"),
+           kwargs={"angle": 90}),
+    Action("imgrotl",    "Sola döndür",                      IMAGES, _t("rotate_images", "imagetools"),
+           kwargs={"angle": -90}),
     # --- her menünün sonunda
     Action("settings",   "Ayarlar…",                         PDF + IMAGES + OFFICE + [FOLDER],
            _t("run", "settings"), interactive=True, batch=True),

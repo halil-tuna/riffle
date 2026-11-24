@@ -16,7 +16,7 @@ Your files never leave your computer.
 
 ## Highlights
 
-- **50 tools in the context menu** — select files, right-click, done. Multiple selection works everywhere
+- **60 tools in the context menu** — select files, right-click, done. Multiple selection works everywhere
   (Windows launches one process per file; Riffle gathers them into one job).
 - **PDF → Word that keeps the layout** — built on pdf2docx with a large repair layer: table widths, two-column
   articles, lost symbol fonts (μ, α, β recovered from glyph names), hyphenation, sub/superscripts, rules and
@@ -34,10 +34,17 @@ Your files never leave your computer.
   **photo → scanned document** (corner detection, true-aspect perspective correction),
   **compress to a target size** (e.g. under 2 MB), **PDF/A**, **PDF → Markdown**, print layouts (2/4/6-up,
   booklet, grayscale) and more.
+- **Word, Excel, PowerPoint and images, too** — shrink Office files by recompressing their pictures (photo-heavy
+  decks fit in an e-mail again), merge Word documents into one .docx (styles, images and numbered lists kept),
+  turn CSV files into clean Excel sheets (encoding and delimiter detected; `1.234,56` and `1,234.56` numbers,
+  European and US dates — ambiguous ones left as text; IDs and leading-zero numbers kept as text), slide handouts with note lines, extract pictures; for images: OCR straight to the clipboard,
+  shrink to a target size (e.g. under 200 KB), PNG, rotate.
 - **Fast** — Office files are converted in a single LibreOffice call with a persistent profile; large jobs use
   every CPU core; long PDF → Word conversions are split into page chunks and run in parallel. Every job can be
   cancelled without leaving half-written files.
 - **Native look** — Windows 11 style (Sun Valley theme), follows the system light/dark mode, dark title bar.
+- **Update notice** — once a week Riffle asks GitHub for the latest version number (nothing else is sent) and
+  shows a link when a newer release exists; can be turned off in Settings.
 
 | | |
 |---|---|
@@ -99,6 +106,9 @@ riffle/tools.py         page tools, numbering, watermark, Excel, PowerPoint, ima
 riffle/docops.py        redaction, compare, crop, Markdown, PDF/A, print layouts, deskew
 riffle/organizer*.py    page organizer (model + window)
 riffle/stamp*.py        signature / text / image placement (model + window)
+riffle/officetools.py   Office shrink, Word merge, CSV → Excel, slide handouts, Office pictures
+riffle/imagetools.py    image OCR, target size, PNG, rotate
+riffle/update.py        weekly update notice (GitHub Releases)
 riffle/forms.py         form filling        riffle/search.py   folder search
 riffle/settings.py      settings, favourites, output folder, appearance
 riffle/theme.py         shared look: Windows 11 theme, light/dark, colours, icon
@@ -133,6 +143,6 @@ Adding a tool: a function in `tools.py` / `docops.py` plus one line in `ACTIONS`
 
 Components: PyMuPDF (AGPL-3.0), pdf2docx (MIT), pymupdf4llm (AGPL-3.0), Pillow (MIT-CMU),
 python-pptx (MIT), openpyxl (MIT), pillow-heif (BSD-3) / libheif (LGPL-3.0), opencv-python-headless
-(Apache-2.0), tkinterdnd2 (MIT), sv-ttk (MIT), darkdetect (BSD-3), pywin32 (PSF).
+(Apache-2.0), tkinterdnd2 (MIT), sv-ttk (MIT), darkdetect (BSD-3), docxcompose (MIT), babel (BSD-3), pywin32 (PSF).
 Font: Liberation Sans (SIL Open Font License 1.1, `riffle/fonts/OFL.txt`).
 External programs: LibreOffice (MPL-2.0), Tesseract (Apache-2.0), Ghostscript (AGPL-3.0).
