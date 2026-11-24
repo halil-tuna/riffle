@@ -399,7 +399,13 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
     dark = a < 170
     scale = 72.0 / RULE_DPI
     ox, oy = page.rect.x0, page.rect.y0
-    # Blank out the word boxes: dense text lines should not be taken for rules
+    # Blank out the word boxes: dense text lines should not be taken for (horizontal) rules.
+    # Vertical rules are searched on the unblanked image: an OCR box often overlaps the cell
+    # border next to it by a few points, and blanking it cut a piece out of that border
+    # (two cells merged in Word, the first digit of a date slipped into the neighbouring cell).
+    # A vertical stroke that lies mostly inside a word box (a large 'I', 'l') is dropped below.
+    raw_dark = dark.copy()
+    in_word = np.zeros_like(dark)
     for w in words or []:
         x0 = int((w.rect.x0 - ox) / scale) + 1
         x1 = int((w.rect.x1 - ox) / scale) - 1
@@ -407,6 +413,7 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
         y1 = int((w.rect.y1 - oy) / scale) - 1
         if x1 > x0 and y1 > y0:
             dark[max(y0, 0):y1, max(x0, 0):x1] = False
+            in_word[max(y0, 0):y1, max(x0, 0):x1] = True
     # tolerance for skewed/faint scans: widen by ±2 px across the line
     def widen(m, axis):
         out = m.copy()
@@ -414,7 +421,7 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
             out |= np.roll(m, k, axis=axis) | np.roll(m, -k, axis=axis)
         return out
     dark_h = widen(dark, 0).astype(np.int32)   # widen vertically for horizontal lines
-    dark_v = widen(dark, 1).astype(np.int32)   # widen horizontally for vertical lines
+    dark_v = widen(raw_dark, 1).astype(np.int32)   # widen horizontally for vertical lines
     rules = []
 
     def runs(mask_2d, L, horizontal):
@@ -432,7 +439,14 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
                 xs = np.where(band.any(axis=0))[0]
                 pos = (start + prev) / 2.0
                 if prev - start <= 12:                # a thin (widened) line, not a thick block
-                    out.append((pos, xs.min(), xs.max() + L))
+                    # a window only needs 80 % ink, so it can start/end up to 0.2·L past the line:
+                    # trim to the line's real ink, otherwise horizontal rules stick out past the
+                    # table's side borders and Word gets extra narrow columns
+                    a0, a1 = xs.min(), xs.max() + L
+                    ink = np.where(m[start:prev + 1, a0:a1].any(axis=0))[0]
+                    if len(ink):
+                        a0, a1 = a0 + ink.min(), a0 + ink.max() + 1
+                    out.append((pos, a0, a1))
                 if r is not None:
                     start = r
         return out
@@ -442,6 +456,9 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
         rules.append((ox + x0 * scale, oy + y * scale, ox + x1 * scale, oy + y * scale))
     Lv = max(25, int(0.03 * pix.height))
     for x, y0, y1 in runs(dark_v, Lv, False):
+        col = in_word[int(y0):int(y1), int(round(x))]
+        if col.size and col.mean() > 0.5:
+            continue                                 # a letter stroke, not a border
         rules.append((ox + x * scale, oy + y0 * scale, ox + x * scale, oy + y1 * scale))
     return _merge_rules(rules)
 
@@ -529,10 +546,13 @@ def text_page(out_doc, src_page, words: list[Word]) -> None:
         for item in sized:
             if abs(item[2] - b) <= 0.15 * b:
                 item[2] = b
+            elif len(item[0]) < 4 and item[1].height <= 1.3 * body_h:
+                item[2] = b      # short piece ('Efe', 've') of normal height: its box says little, use body size
     ratios = sorted(x for t, _, _, x in sized if len(t) >= 4 and x > 0) or [0.0]
     base = ratios[len(ratios) // 2]
     for text, r, size, ratio in sized:
-        bold = base > 0 and len(text) >= 3 and ratio > 1.3 * base
+        # ink of 1-3 letters varies too much with the letters themselves to tell bold apart
+        bold = base > 0 and len(text) >= 4 and ratio > 1.3 * base
         f = bold_font if bold else font
         length = f.text_length(text, fontsize=size)
         if length > r.width * 1.08 and length > 0:      # don't overflow

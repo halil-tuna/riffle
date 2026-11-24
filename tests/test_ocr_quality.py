@@ -94,3 +94,36 @@ def test_needs_cleaning_ignores_sparse_clean_page():
     assert not ocr._needs_cleaning(Image.fromarray(a))
     a[a == 20] = 200                                      # same strokes, faint
     assert ocr._needs_cleaning(Image.fromarray(a))
+
+
+def _grid_scan(xs, ys):
+    """A 'scanned' page (image only) with a table grid drawn 2 px thick at 200 dpi."""
+    k = 200 / 72
+    a = np.full((int(792 * k), int(612 * k)), 250, np.uint8)
+    for x in xs:
+        a[int(ys[0] * k):int(ys[-1] * k) + 2, int(x * k):int(x * k) + 2] = 30
+    for y in ys:
+        a[int(y * k):int(y * k) + 2, int(xs[0] * k):int(xs[-1] * k) + 2] = 30
+    buf = io.BytesIO()
+    Image.fromarray(a).save(buf, format="PNG")
+    d = pymupdf.open()
+    p = d.new_page(width=612, height=792)
+    p.insert_image(p.rect, stream=buf.getvalue())
+    return d, p
+
+
+def test_rules_end_at_table_border_and_survive_overlapping_words():
+    """Rules stop at the table's outer border (a horizontal rule sticking out by 0.2·L made Word add
+    narrow phantom columns), and an OCR word box overlapping a vertical border does not cut it."""
+    xs, ys = [72, 142, 325, 395, 468, 540], [100, 140, 180, 220, 260]
+    doc, page = _grid_scan(xs, ys)
+    # a date whose OCR box runs 3 pt over the border at x=395 (as on the real scan)
+    words = [ocr.Word("07.12.2026", pymupdf.Rect(392, 105, 446, 120), 95, (1, 1, 1))]
+    rules = ocr.detect_rules(page, words)
+    hs = [r for r in rules if r[1] == r[3]]
+    vs = [r for r in rules if r[0] == r[2]]
+    assert len(hs) == len(ys) and len(vs) == len(xs)
+    for x0, _, x1, _ in hs:
+        assert abs(x0 - xs[0]) < 2 and abs(x1 - xs[-1]) < 3
+    border = min(vs, key=lambda r: abs(r[0] - 395))
+    assert border[1] < ys[0] + 3 and border[3] > ys[-1] - 3          # full height, not cut at the word
