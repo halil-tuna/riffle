@@ -192,3 +192,36 @@ def test_textless_pages_render_in_place(tmp_path):
             assert len(boxes) == 1
             assert abs(boxes[0][0]) < 1 and abs(boxes[0][1]) < 1
             assert abs(boxes[0][2] - r[i].rect.width) < 1
+
+
+def test_headings_keep_with_next_and_body_gets_wrap_room(tmp_path, monkeypatch):
+    """A larger heading is kept with the paragraph after it (it must not end up alone at the
+    bottom of a page), and body paragraphs get 2 pt more room on the right so lines that filled
+    the PDF's width don't wrap one word early."""
+    src = tmp_path / "baslik.pdf"
+    d = pymupdf.open()
+    p = d.new_page(width=595, height=842)
+    _text(p, (72, 90), "3.5 Güvenlik zinciri ve kapı düğmeleri", 16)
+    y = 120
+    for k in range(6):
+        _text(p, (72, y), "Acil stop, kapak anahtarı, su seviye şamandırası ve bekçi rölesi sıra halinde bağlı.")
+        y += 15
+    d.save(src)
+    from riffle import actions
+
+    def convert():
+        out = pdf_to_word([src], noop)[0]
+        xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+        out.unlink()
+        return re.findall(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', xml, re.S)
+
+    def right(q):
+        return int(re.search(r'<w:ind\b[^>]*w:right="(-?\d+)"', q).group(1))
+
+    paras = convert()
+    head = next(q for q in paras if "Güvenlik zinciri" in q)
+    body = next(q for q in paras if "Acil stop" in q)
+    assert "<w:keepNext/>" in head and "<w:keepNext/>" not in body
+    monkeypatch.setattr(actions, "_WRAP_SLACK", 0)
+    exact = next(q for q in convert() if "Acil stop" in q)
+    assert right(body) == right(exact) - 40

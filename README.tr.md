@@ -207,12 +207,12 @@ Program belgenin türünü kendisi anlar:
 
 ## Kurulum — Windows 11 (kolay yol: kurulum dosyası)
 
-GitHub'daki **Releases** sayfasından `Riffle-1.0.4-setup.exe`'yi indir, çalıştır (yönetici yetkisi
+GitHub'daki **Releases** sayfasından `Riffle-1.0.5-setup.exe`'yi indir, çalıştır (yönetici yetkisi
 istemez). Sağ tık menüsü kendiliğinden eklenir; kaldırınca menü de silinir. Kurulumun son ekranındaki
 bağlantılardan isteğe bağlı bileşenleri kur: LibreOffice (Office → PDF), Tesseract (OCR, *Turkish*'i işaretle),
 Ghostscript (PDF/A).
 
-Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v1.0.4` gibi bir etiket (tag) gönderince
+Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v1.0.5` gibi bir etiket (tag) gönderince
 `.github/workflows/windows-exe.yml` Windows'ta testleri çalıştırır, PyInstaller ile paketler, paketi gerçek bir
 PDF'le dener, Inno Setup ile `…-setup.exe` yapar ve sürüme ekler. Elle de çalıştırılabilir
 (Actions → *Windows installer* → *Run workflow*; çıktı *Artifacts* altında).

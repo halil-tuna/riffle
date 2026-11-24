@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -630,7 +631,200 @@ def _fix_layout_xml(xml: str, info=None) -> str:
         xml = _apply_rules(xml, info.rules)
     # 6) Pages turned into a single image (handwriting, drawings): pin them to the page corner
     xml = _pin_page_images(xml)
+    # 7) a little room on the right so lines that filled the PDF's width don't wrap early
+    xml = _wrap_slack(xml)
+    # 8) headings stay on the page of the paragraph they introduce
+    xml = _keep_headings_with_next(xml)
     return xml
+
+
+def _body_paragraphs(xml: str, fn) -> str:
+    """Applies fn to every body paragraph outside tables and text boxes (fn gets the paragraph
+    and the text that follows it in its segment, returns the new paragraph)."""
+    body_start = xml.find("<w:body>")
+    if body_start < 0:
+        return xml
+    out, pos, depth = [], body_start, 0
+    para = re.compile(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', re.S)
+
+    def fix(seg: str) -> str:
+        return para.sub(lambda m: fn(m.group(0), seg[m.end():m.end() + 200]), seg)
+
+    for m in _SKIP_SPANS.finditer(xml, body_start):
+        if depth == 0:
+            out.append(fix(xml[pos:m.start()]))
+            pos = m.start()
+        depth += -1 if m.group(0).startswith("</") else 1
+        if depth == 0:
+            out.append(xml[pos:m.end()])
+            pos = m.end()
+    out.append(fix(xml[pos:]) if depth == 0 else xml[pos:])
+    return xml[:body_start] + "".join(out)
+
+
+def _keep_headings_with_next(xml: str) -> str:
+    """pdf2docx headings are plain paragraphs: without Word's 'keep with next' a heading whose
+    page ran a line longer than in the PDF ends up alone at the bottom of that page.
+    Heading = a short paragraph, all of it bold or clearly larger than the body text,
+    followed by another paragraph or a table."""
+    sizes = Counter()
+    for sz, txt in re.findall(r'<w:sz w:val="(\d+)"/>.*?<w:t[^>]*>([^<]*)</w:t>', xml, re.S):
+        sizes[int(sz)] += len(txt)
+    if not sizes:
+        return xml
+    body = sizes.most_common(1)[0][0]
+
+    def fn(p: str, after: str) -> str:
+        if "<w:keepNext" in p or "<w:sectPr" in p or not re.match(r'\s*<w:(?:p[ >]|tbl>)', after):
+            return p
+        runs = re.findall(r'<w:r>(.*?)</w:r>', p, re.S)
+        texts = [(r, "".join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', r))) for r in runs]
+        texts = [(r, t) for r, t in texts if t.strip()]
+        text = "".join(t for _, t in texts).strip()
+        if not text or len(text) > 120 or text.endswith((".", ":", ";", ",")):
+            return p
+        bold = all(re.search(r'<w:b/>|<w:b w:val="(?:1|true|on)"/>', r) for r, _ in texts)
+        szs = [int(m.group(1)) for r, _ in texts for m in [re.search(r'<w:sz w:val="(\d+)"/>', r)] if m]
+        larger = len(szs) == len(texts) and min(szs) >= body + 2      # ≥ 1 pt larger
+        if not (bold or larger):
+            return p
+        if "<w:pPr>" not in p:
+            return re.sub(r'(<w:p(?: [^>]*)?>)', r'\1<w:pPr><w:keepNext/></w:pPr>', p, count=1)
+        k = p.find("<w:pPr>") + len("<w:pPr>")
+        st = re.match(r'<w:pStyle [^>]*/>', p[k:])
+        if st:
+            k += st.end()
+        return p[:k] + "<w:keepNext/>" + p[k:]
+
+    return _body_paragraphs(xml, fn)
+
+
+_WRAP_SLACK = 40   # twips (2 pt)
+_SKIP_SPANS = re.compile(r'<w:tbl>|</w:tbl>|<w:txbxContent>|</w:txbxContent>')
+
+
+def _wrap_slack(xml: str) -> str:
+    """pdf2docx sets the text width to the longest line exactly. Rounding in Word/LibreOffice
+    (and an indent a point off) then pushes the last word of such a line down, every following
+    line shifts, and a heading can end up at the bottom of the previous page. Lower the right
+    indent of body paragraphs by 2 pt (a negative indent is valid; it reaches into the margin).
+    Paragraphs in tables and text boxes keep their exact width (fixed cells / frames)."""
+    def fn(p: str, _after: str) -> str:
+        if not re.search(r'<w:jc w:val="(?:left|both)"/>', p) and "<w:jc " in p:
+            return p          # centred / right-aligned: width doesn't wrap anything
+        ind = re.search(r'<w:ind\b[^>]*/>', p)
+        if not ind:
+            return p
+        tag = ind.group(0)
+        r = re.search(r'w:right="(-?\d+)"', tag)
+        new = (tag.replace(r.group(0), f'w:right="{int(r.group(1)) - _WRAP_SLACK}"') if r
+               else tag.replace("/>", f' w:right="{-_WRAP_SLACK}"/>'))
+        return p.replace(tag, new, 1)
+
+    return _body_paragraphs(xml, fn)
+
+
+def _body_paragraphs(xml: str, fn) -> str:
+    """Applies fn to every body paragraph outside tables and text boxes (fn gets the paragraph
+    and the text that follows it in its segment, returns the new paragraph)."""
+    body_start = xml.find("<w:body>")
+    if body_start < 0:
+        return xml
+    out, pos, depth = [], body_start, 0
+    para = re.compile(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', re.S)
+
+    def fix(seg: str) -> str:
+        return para.sub(lambda m: fn(m.group(0), seg[m.end():m.end() + 200]), seg)
+
+    for m in _SKIP_SPANS.finditer(xml, body_start):
+        if depth == 0:
+            out.append(fix(xml[pos:m.start()]))
+            pos = m.start()
+        depth += -1 if m.group(0).startswith("</") else 1
+        if depth == 0:
+            out.append(xml[pos:m.end()])
+            pos = m.end()
+    out.append(fix(xml[pos:]) if depth == 0 else xml[pos:])
+    return xml[:body_start] + "".join(out)
+
+
+def _keep_headings_with_next(xml: str) -> str:
+    """pdf2docx headings are plain paragraphs: without Word's 'keep with next' a heading whose
+    page ran a line longer than in the PDF ends up alone at the bottom of that page.
+    Heading = a short paragraph, all of it bold or clearly larger than the body text,
+    followed by another paragraph or a table."""
+    sizes = Counter()
+    for sz, txt in re.findall(r'<w:sz w:val="(\d+)"/>.*?<w:t[^>]*>([^<]*)</w:t>', xml, re.S):
+        sizes[int(sz)] += len(txt)
+    if not sizes:
+        return xml
+    body = sizes.most_common(1)[0][0]
+
+    def fn(p: str, after: str) -> str:
+        if "<w:keepNext" in p or "<w:sectPr" in p or not re.match(r'\s*<w:(?:p[ >]|tbl>)', after):
+            return p
+        runs = re.findall(r'<w:r>(.*?)</w:r>', p, re.S)
+        texts = [(r, "".join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', r))) for r in runs]
+        texts = [(r, t) for r, t in texts if t.strip()]
+        text = "".join(t for _, t in texts).strip()
+        if not text or len(text) > 120 or text.endswith((".", ":", ";", ",")):
+            return p
+        bold = all(re.search(r'<w:b/>|<w:b w:val="(?:1|true|on)"/>', r) for r, _ in texts)
+        szs = [int(m.group(1)) for r, _ in texts for m in [re.search(r'<w:sz w:val="(\d+)"/>', r)] if m]
+        larger = len(szs) == len(texts) and min(szs) >= body + 2      # ≥ 1 pt larger
+        if not (bold or larger):
+            return p
+        if "<w:pPr>" not in p:
+            return re.sub(r'(<w:p(?: [^>]*)?>)', r'\1<w:pPr><w:keepNext/></w:pPr>', p, count=1)
+        k = p.find("<w:pPr>") + len("<w:pPr>")
+        st = re.match(r'<w:pStyle [^>]*/>', p[k:])
+        if st:
+            k += st.end()
+        return p[:k] + "<w:keepNext/>" + p[k:]
+
+    return _body_paragraphs(xml, fn)
+
+
+_WRAP_SLACK = 40   # twips (2 pt)
+_SKIP_SPANS = re.compile(r'<w:tbl>|</w:tbl>|<w:txbxContent>|</w:txbxContent>')
+
+
+def _wrap_slack(xml: str) -> str:
+    """pdf2docx sets the text width to the longest line exactly. Rounding in Word/LibreOffice
+    (and an indent a point off) then pushes the last word of such a line down, every following
+    line shifts, and a heading can end up at the bottom of the previous page. Lower the right
+    indent of body paragraphs by 2 pt (a negative indent is valid; it reaches into the margin).
+    Paragraphs in tables and text boxes keep their exact width (fixed cells / frames)."""
+    body_start = xml.find("<w:body>")
+    if body_start < 0:
+        return xml
+    out, pos, depth = [], body_start, 0
+
+    def fix(seg: str) -> str:
+        def one(m):
+            p = m.group(0)
+            if not re.search(r'<w:jc w:val="(?:left|both)"/>', p) and "<w:jc " in p:
+                return p          # centred / right-aligned: width doesn't wrap anything
+            ind = re.search(r'<w:ind\b[^>]*/>', p)
+            if ind:
+                tag = ind.group(0)
+                r = re.search(r'w:right="(-?\d+)"', tag)
+                new = (tag.replace(r.group(0), f'w:right="{int(r.group(1)) - _WRAP_SLACK}"') if r
+                       else tag.replace("/>", f' w:right="{-_WRAP_SLACK}"/>'))
+                return p.replace(tag, new, 1)
+            return p
+        return re.sub(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', one, seg, flags=re.S)
+
+    for m in _SKIP_SPANS.finditer(xml, body_start):
+        if depth == 0:
+            out.append(fix(xml[pos:m.start()]))
+            pos = m.start()
+        depth += -1 if m.group(0).startswith("</") else 1
+        if depth == 0:
+            out.append(xml[pos:m.end()])
+            pos = m.end()
+    out.append(fix(xml[pos:]) if depth == 0 else xml[pos:])
+    return xml[:body_start] + "".join(out)
 
 
 _FULL_PAGE_PARA = re.compile(
@@ -980,9 +1174,12 @@ def _fix_list_para(p: str) -> str:
         left = int(attrs.get("left", 0))
         marker = left - int(attrs.get("hanging", 0)) + int(attrs.get("firstLine", 0))
         gap = 284 if first_txt in _BULLETS else 397  # 0.5 cm / 0.7 cm (twips)
-        right = attrs.get("right", "0")
+        new_left = max(marker, 0) + gap
+        # the text now starts (new_left - left) further right: give that back on the right,
+        # otherwise lines that filled the original width wrap one word early
+        right = int(attrs.get("right", 0)) - max(0, new_left - left)
         ppr = ppr.replace(ind.group(0),
-                          f'<w:ind w:left="{max(marker, 0) + gap}" w:right="{right}" w:hanging="{gap}"/>')
+                          f'<w:ind w:left="{new_left}" w:right="{right}" w:hanging="{gap}"/>')
         ppr = re.sub(r'<w:tabs>.*?</w:tabs>', '', ppr, flags=re.S)
 
     paras = []
