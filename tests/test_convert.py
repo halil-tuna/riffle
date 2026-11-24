@@ -46,11 +46,15 @@ def test_pdf_to_word_flow(pdf):
     assert grids, "tablo ızgarası yok"
 
 
-def test_pdf_to_word_strips_ink_keeps_text(inked):
+def test_pdf_to_word_ink_kept_as_picture_text_intact(inked):
+    """The pen tick doesn't become a layout-breaking shape: the text stays whole and the
+    tick comes back as a floating picture (no 'not transferred' notice)."""
     msgs = []
     out = pdf_to_word([inked], msgs.append)[0]
-    assert any("el yazısı" in m for m in msgs)
-    assert "Başlık" in docx_text(docx_xml(out))
+    x = docx_xml(out)
+    assert "Başlık" in docx_text(x)
+    assert 'name="Pen 1"' in x and "<wp:wrapNone/>" in x
+    assert not any("el yazısı" in m for m in msgs)
 
 
 def test_pdf_to_word_cropped_page_keeps_text(cropped):

@@ -359,6 +359,8 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
     for p in paths:
         progress(T("Word'e çevriliyor: {0} (uzun sürebilir)", p.name))
         out = unique_path(p.parent, p.stem, ".docx")
+        with open_pdf(p) as d:
+            ink = _collect_ink(d)
         with tempfile.TemporaryDirectory(prefix="riffle_w_") as tmp:
             src = _prepare_pdf(p, Path(tmp) / "kaynak.pdf", progress)
             from . import fixed_layout, reflow
@@ -373,6 +375,8 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                 # Slides and two-column papers: lines/pages shift in flowing text, use the exact layout
                 progress(T("ℹ {0}: {1} algılandı, birebir düzen kullanıldı (yazılar yerinde düzenlenebilir). Akan metin için: 'PDF → Word (akan metin)'.", p.name, kind))
                 fixed_layout.convert(src, out, progress)
+                if ink:
+                    progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", p.name, len(ink)))
                 outputs.append(out)
                 continue
             with pymupdf.open(src) as d:
@@ -409,8 +413,149 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
             if fixes["glyph"]:
                 progress(T("ℹ {0}: {1} özel karakter (μ, α, ± …) kurtarıldı.", p.name, fixes['glyph']))
         _unclip_table_rows(out, info)
+        if ink:
+            try:
+                placed = _add_ink(out, ink)
+            except Exception:
+                placed = 0
+            if placed < len(ink):
+                progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", p.name, len(ink) - placed))
         outputs.append(out)
     return outputs
+
+
+# ---------------------------------------------------------------- pen marks (Ink annotations)
+
+def _norm(t: str) -> str:
+    return re.sub(r"\s+", "", t).lower()
+
+
+def _collect_ink(doc) -> list[dict]:
+    """Ink annotations (pen ticks, underlines, circles) as transparent PNGs, each with the
+    text it sits on: the PDF line nearest to it and the first lines of that line's block
+    (to find the Word paragraph and its top again after conversion)."""
+    items = []
+    for pno, page in enumerate(doc):
+        inks = list(page.annots(types=[pymupdf.PDF_ANNOT_INK]))
+        if not inks:
+            continue
+        lines = []
+        for b in page.get_text("dict")["blocks"]:
+            bl = [(pymupdf.Rect(l["bbox"]), "".join(s["text"] for s in l["spans"]))
+                  for l in b.get("lines", [])]
+            bl = [(r, t) for r, t in bl if t.strip()]
+            for k, (r, t) in enumerate(bl):
+                lines.append((r, t, bl[:k + 1]))
+        for annot in inks:
+            r = annot.rect
+            try:
+                png = annot.get_pixmap(dpi=200, alpha=True).tobytes("png")
+            except Exception:
+                continue
+            cy = (r.y0 + r.y1) / 2
+            near = min(lines, key=lambda L: abs((L[0].y0 + L[0].y1) / 2 - cy), default=None)
+            if near and abs((near[0].y0 + near[0].y1) / 2 - cy) > 40:
+                near = None
+            items.append({"page": pno, "rect": pymupdf.Rect(r), "png": png,
+                          "line": near[1] if near else "", "above": near[2] if near else []})
+    return items
+
+
+def _add_ink(docx: Path, items: list[dict]) -> int:
+    """Puts the pen marks back into the Word file as pictures floating over the text (wrapNone:
+    they push nothing). Vertically they hang on the paragraph that holds the marked line, so
+    they move with it when the text reflows; horizontally they sit where they were on the page.
+    Returns how many could be placed."""
+    import zipfile
+    from .fixed_layout import EMU
+    if not items:
+        return 0
+    with zipfile.ZipFile(docx) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+        types = z.read("[Content_Types].xml").decode("utf-8")
+    body = xml.find("<w:body>")
+    paras = [(m.start(), m.end(), m.group(0)) for m in
+             re.finditer(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', xml[body:], re.S)]
+    texts = [_norm("".join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', p))) for _, _, p in paras]
+    inserts, media, placed, search_from = {}, [], 0, 0
+    for n, it in enumerate(items):
+        key = _norm(it["line"])[:40]
+        if len(key) < 6:
+            continue
+        # paragraphs come in page order: search forward from the last hit first
+        order = list(range(search_from, len(paras))) + list(range(0, search_from))
+        hit = next((i for i in order if key in texts[i]), None)
+        if hit is None:
+            continue
+        search_from = hit
+        # top of that paragraph in the PDF: the earliest line of the block that starts it
+        top = None
+        for r, t in it["above"]:
+            if len(_norm(t)) >= 4 and texts[hit].startswith(_norm(t)[:15]):
+                top = r.y0
+                break
+        if top is None:
+            continue
+        # 'relative to paragraph' counts from above the paragraph's space-before
+        sb = re.search(r'<w:spacing\b[^>]*w:before="(\d+)"', paras[hit][2])
+        top -= int(sb.group(1)) / 20 if sb else 0
+        r = it["rect"]
+        rid = f"rIdInk{n + 1}"
+        media.append((rid, it["png"]))
+        did = 9000 + n
+        run = (f'<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" '
+               f'relativeHeight="{did}" behindDoc="0" locked="0" layoutInCell="0" allowOverlap="1">'
+               f'<wp:simplePos x="0" y="0"/>'
+               f'<wp:positionH relativeFrom="page"><wp:posOffset>{round(r.x0 * EMU)}</wp:posOffset></wp:positionH>'
+               f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{round((r.y0 - top) * EMU)}</wp:posOffset></wp:positionV>'
+               f'<wp:extent cx="{round(r.width * EMU)}" cy="{round(r.height * EMU)}"/>'
+               f'<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>'
+               f'<wp:docPr id="{did}" name="Pen {n + 1}"/><wp:cNvGraphicFramePr/>'
+               '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+               '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+               '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+               f'<pic:nvPicPr><pic:cNvPr id="{did}" name="Pen {n + 1}"/><pic:cNvPicPr/></pic:nvPicPr>'
+               f'<pic:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+               f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{round(r.width * EMU)}" cy="{round(r.height * EMU)}"/>'
+               '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>'
+               '</a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>')
+        inserts.setdefault(hit, []).append(run)
+        placed += 1
+    if not placed:
+        return 0
+    out, pos = [], body
+    for i in sorted(inserts):
+        s0, _, p = paras[i]
+        s0 += body
+        m = re.match(r'<w:p(?: [^>]*)?>(?:<w:pPr>.*?</w:pPr>)?', p, re.S)
+        cut = s0 + m.end()
+        out.append(xml[pos:cut])
+        out.append("".join(inserts[i]))
+        pos = cut
+    xml = xml[:body] + "".join(out) + xml[pos:]
+    if 'xmlns:r=' not in xml[:3000]:
+        return 0
+    rels = rels.replace("</Relationships>", "".join(
+        f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+        f'relationships/image" Target="media/{rid}.png"/>' for rid, _ in media) + "</Relationships>")
+    if 'Extension="png"' not in types:
+        types = types.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>')
+    tmp = docx.with_suffix(".ink")
+    with zipfile.ZipFile(docx) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "word/document.xml":
+                data = xml.encode("utf-8")
+            elif item.filename == "word/_rels/document.xml.rels":
+                data = rels.encode("utf-8")
+            elif item.filename == "[Content_Types].xml":
+                data = types.encode("utf-8")
+            zout.writestr(item, data)
+        for rid, png in media:
+            zout.writestr(f"word/media/{rid}.png", png)
+    os.replace(tmp, docx)
+    return placed
 
 
 def _parallel_enabled() -> bool:
@@ -444,8 +589,9 @@ def _run_cancellable(cmd, timeout: float, flags: int = 0):
 def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
     """Prepares the PDF before handing it to pdf2docx. Returns the original if nothing changes.
 
-    - Removes handwritten (Ink) annotations: pen ticks become free shapes in Word
-      and break the text layout. Highlights are kept.
+    - Removes handwritten (Ink) annotations: pdf2docx makes them free shapes that break the
+      text layout. pdf_to_word puts them back afterwards as floating pictures (_add_ink).
+      Highlights are kept.
     - Turns pages without text (scanned, handwritten, drawings) into page images:
       pdf2docx skips vector lines, otherwise the page comes out empty or incomplete.
     """
@@ -464,8 +610,6 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
                    if page.cropbox != page.mediabox or page.mediabox.x0 or page.mediabox.y0}
         if not ink and not textless and not cropped:
             return src
-        if ink:
-            progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", src.name, ink))
         # Pages without text: OCR if Tesseract is available → editable text if it is mostly text
         ocr_words, ocr_used = {}, set()
         if textless:

@@ -225,3 +225,58 @@ def test_headings_keep_with_next_and_body_gets_wrap_room(tmp_path, monkeypatch):
     monkeypatch.setattr(actions, "_WRAP_SLACK", 0)
     exact = next(q for q in convert() if "Acil stop" in q)
     assert right(body) == right(exact) - 40
+
+
+def _pen_pdf(path):
+    d = pymupdf.open()
+    p = d.new_page(width=595, height=842)
+    _text(p, (72, 100), "1. Bölüm başlığı", 16)
+    y = 130
+    for k in range(5):
+        _text(p, (72, y), f"Satır {k + 1}: su seviye şamandırası ve sıcaklık anahtarı seri bağlı.")
+        y += 16
+    # pen underline under line 3, a tick in the margin of line 5
+    a = p.add_ink_annot([[(110, 165), (200, 166), (290, 164)]])
+    a.set_colors(stroke=(0, 0.3, 0.9))
+    a.set_border(width=1.5)
+    a.update()
+    t = p.add_ink_annot([[(52, 190), (56, 196), (66, 182)]])
+    t.set_border(width=1.5)
+    t.update()
+    d.save(path)
+
+
+def test_pen_marks_come_back_as_floating_pictures(tmp_path):
+    """Ink annotations are taken out before pdf2docx (it turned them into layout-breaking shapes)
+    and put back as pictures that float over the text, hung on the marked paragraph."""
+    src = tmp_path / "kalem.pdf"
+    _pen_pdf(src)
+    out = pdf_to_word([src], noop)[0]
+    z = zipfile.ZipFile(out)
+    xml = z.read("word/document.xml").decode()
+    pens = re.findall(r'<wp:anchor[^>]*>.*?</wp:anchor>', xml, re.S)
+    pens = [a for a in pens if 'name="Pen ' in a]
+    assert len(pens) == 2
+    for a in pens:
+        assert "<wp:wrapNone/>" in a and 'positionV relativeFrom="paragraph"' in a
+    assert sum(n.startswith("word/media/rIdInk") for n in z.namelist()) == 2
+    assert 'Extension="png"' in z.read("[Content_Types].xml").decode()
+    from lxml import etree
+    etree.fromstring(xml.encode())
+
+
+@needs_soffice
+def test_pen_marks_render_where_they_were(tmp_path):
+    import subprocess
+    src = tmp_path / "kalem.pdf"
+    _pen_pdf(src)
+    out = pdf_to_word([src], noop)[0]
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", str(tmp_path / "r"), str(out)],
+                   check=True, capture_output=True, timeout=180)
+    with pymupdf.open(src) as a, pymupdf.open(tmp_path / "r" / (out.stem + ".pdf")) as r:
+        want = sorted((x.rect for x in a[0].annots()), key=lambda q: q.y0)
+        got = sorted((pymupdf.Rect(i["bbox"]) for i in r[0].get_image_info()), key=lambda q: q.y0)
+        assert len(got) == 2
+        for w, g in zip(want, got):
+            assert abs(w.x0 - g.x0) < 2 and abs(w.y0 - g.y0) < 3

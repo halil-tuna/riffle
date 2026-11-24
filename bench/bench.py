@@ -6,6 +6,8 @@ and is compared with the original.
 
     python bench/bench.py corpus/ --engine app  --out results_app
     python bench/bench.py corpus/ --engine raw  --out results_raw
+    python bench/bench.py corpus/ --engine given --docx-dir ilovepdf/ --out results_ilovepdf
+        (scores Word files made elsewhere, e.g. by an online converter: <stem>.docx for each <stem>.pdf)
     python bench/bench.py --compare results_raw results_app
 
 Metrics (all 0-100, higher = better):
@@ -63,6 +65,11 @@ def convert(engine: str, pdf: Path, docx: Path) -> None:
         if out != docx:
             shutil.move(out, docx)
         tmp_pdf.unlink()
+    elif engine.startswith("given:"):
+        src = Path(engine[len("given:"):]) / (pdf.stem + ".docx")
+        if not src.exists():
+            raise FileNotFoundError(f"no {src.name} in {src.parent}")
+        shutil.copy2(src, docx)
     else:
         raise ValueError(engine)
 
@@ -91,9 +98,9 @@ def text_score(a: list[str], b: list[str]) -> float | None:
     return 100.0 * matched / max(len(a), 1)  # how much of the original is in the right order
 
 
-def ink(page, width=RENDER_W) -> np.ndarray:
+def ink(page, width=RENDER_W, annots=False) -> np.ndarray:
     z = width / page.rect.width
-    pix = page.get_pixmap(matrix=pymupdf.Matrix(z, z), colorspace=pymupdf.csGRAY, annots=False)
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(z, z), colorspace=pymupdf.csGRAY, annots=annots)
     im = Image.frombytes("L", (pix.width, pix.height), pix.samples)
     return np.asarray(im) < 200
 
@@ -188,7 +195,7 @@ def run_one(args) -> dict:
     ts = text_score(ref, words(b))
     res["text"] = None if ts is None else round(ts, 1)
 
-    ia = [ink(p) for p in a]
+    ia = [ink(p, annots=True) for p in a]     # the original as the reader sees it, pen marks included
     ib = [ink(p) for p in b]
     extra_blank = max(0, sum(map(blank, ib)) - sum(map(blank, ia)))
     res["extra_blank_pages"] = extra_blank
@@ -245,7 +252,8 @@ def compare(a_dir: Path, b_dir: Path) -> str:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("corpus", nargs="?")
-    ap.add_argument("--engine", default="app", choices=["app", "raw"])
+    ap.add_argument("--engine", default="app", choices=["app", "raw", "given"])
+    ap.add_argument("--docx-dir", help="with --engine given: folder of ready-made <stem>.docx files")
     ap.add_argument("--out", default="results")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--compare", nargs=2)
@@ -253,6 +261,10 @@ def main():
     if a.compare:
         print(compare(Path(a.compare[0]), Path(a.compare[1])))
         return
+    if a.engine == "given":
+        if not a.docx_dir:
+            ap.error("--engine given needs --docx-dir")
+        a.engine = "given:" + str(Path(a.docx_dir).resolve())
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     pdfs = sorted(Path(a.corpus).glob("*.pdf"))
