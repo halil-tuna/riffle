@@ -295,3 +295,25 @@ def test_csv_ambiguous_slash_dates_stay_text(tmp_path):
     p.write_text("tarih,not\n03/11/2026,a\n04/05/2026,b\n", encoding="utf-8")
     ws = openpyxl.load_workbook(officetools.csv_to_excel([p], noop)[0]).active
     assert ws["A2"].value == "03/11/2026"          # 3 Kasım mı 11 Mart mı belli değil: yanlış tarih üretme
+
+
+@pytest.mark.skipif(not shutil.which("tesseract"), reason="Tesseract yok")
+def test_image_text_marks_unreadable_equation(tmp_path):
+    """Okunamayan denklem/şekil sessizce kaybolmaz: yerinde işaret kalır, metin sırası korunur."""
+    from PIL import Image, ImageDraw, ImageFont
+    from riffle.ocr import _font_file
+    im = Image.new("RGB", (1400, 520), "white")
+    dr = ImageDraw.Draw(im)
+    f = ImageFont.truetype(_font_file(), 40)
+    dr.text((60, 40), "The bending stress is given by", fill="black", font=f)
+    for k in range(5):                              # kelime olmayan çizim (formül / şekil yerine)
+        dr.arc((200 + 90 * k, 150, 280 + 90 * k, 260), 200, 340, fill="black", width=5)
+    dr.line((200, 205, 700, 205), fill="black", width=4)
+    dr.text((60, 330), "where c is the distance from the axis.", fill="black", font=f)
+    p = tmp_path / "formul.png"
+    im.save(p)
+    text = imagetools.image_text([p], noop)[0].read_text(encoding="utf-8")
+    lines = [l for l in text.splitlines() if l]
+    assert lines[0].startswith("The bending stress") and imagetools.MARK in lines[1]
+    assert "distance from the axis" in lines[-1]
+    assert imagetools._fix_symbols("€y ve €5") == "εy ve €5"

@@ -18,23 +18,83 @@ def _open(p: Path):
 
 # ============================================================ görseldeki yazı
 
-def _text_from_words(words) -> str:
-    """OCR kelimelerini okuma sırasıyla satır ve paragraflara diz."""
+MARK = "[denklem / şekil — okunamadı]"
+
+
+def _ink_bands(gray, min_ink: int = 3) -> list[tuple[int, int]]:
+    """Görüntüde mürekkep olan yatay şeritler (piksel satır aralıkları)."""
+    import numpy as np
+    a = np.asarray(gray, dtype=np.uint8)
+    ink = (a < 140).sum(axis=1)
+    rows = ink >= min_ink
+    bands, start = [], None
+    for y, on in enumerate(rows):
+        if on and start is None:
+            start = y
+        elif not on and start is not None:
+            bands.append((start, y))
+            start = None
+    if start is not None:
+        bands.append((start, len(rows)))
+    # aynı satırın kopuk parçaları (i noktası, alt simge) birleşsin
+    merged = []
+    for b in bands:
+        if merged and b[0] - merged[-1][1] <= 3:
+            merged[-1] = (merged[-1][0], b[1])
+        else:
+            merged.append(b)
+    return merged
+
+
+def _fix_symbols(text: str) -> str:
+    # matematikte ε'yi Tesseract € okuyor; para birimi (€5, € 10) dokunulmaz
+    return re.sub(r"€(?=[A-Za-z])", "ε", text)
+
+
+def _text_from_words(words, gray=None, scale: float = 1.0) -> str:
+    """OCR kelimelerini okuma sırasıyla satır ve paragraflara diz.
+
+    Denklemler, kesirler ve şekiller Tesseract'ın işi değil: ya hiç okunmuyor ya çöp çıkıyor. Görüntü
+    (gray) verilirse bunlar sessizce kaybolmasın diye yerlerine işaret konur: mürekkebi olup kelimesi
+    olmayan şeritler ve güveni düşük kısa satırlar."""
     from .ocr import _clean
     lines: dict[tuple, list] = {}
     for w in _clean(words):
         if w.conf < 30:
             continue
         lines.setdefault(w.line_key, []).append(w)
-    ordered = sorted(lines.items(), key=lambda kv: (min(w.rect.y0 for w in kv[1]), min(w.rect.x0 for w in kv[1])))
-    out, prev_par = [], None
-    for key, ws in ordered:
+    items = []      # (y_px, tür, içerik, paragraf anahtarı)
+    for key, ws in lines.items():
         ws.sort(key=lambda w: w.rect.x0)
-        par = key[:2]
-        if prev_par is not None and par != prev_par:
+        y0 = min(w.rect.y0 for w in ws) / scale
+        y1 = max(w.rect.y1 for w in ws) / scale
+        conf = sum(w.conf for w in ws) / len(ws)
+        text = " ".join(w.text for w in ws)
+        weak = gray is not None and conf < 80 and len(ws) <= 4
+        items.append([(y0 + y1) / 2, "mark" if weak else "text", text, key[:2], (y0, y1)])
+    heights = sorted(it[4][1] - it[4][0] for it in items if it[1] == "text") or [20]
+    line_h = heights[len(heights) // 2]
+    if gray is not None:
+        for b0, b1 in _ink_bands(gray):
+            if b1 - b0 < 0.5 * line_h:
+                continue                                   # çizgi, gürültü
+            covered = any(it[4][0] - 3 <= (b0 + b1) / 2 <= it[4][1] + 3 or b0 <= (it[4][0] + it[4][1]) / 2 <= b1
+                          for it in items)
+            if not covered:
+                items.append([(b0 + b1) / 2, "mark", "", None, (b0, b1)])
+    items.sort(key=lambda it: it[0])
+    out, prev_par, prev_kind, prev_box = [], None, None, None
+    for _, kind, text, par, box in items:
+        if kind == "mark":
+            if prev_kind != "mark":
+                out.append(MARK)
+            prev_kind, prev_par, prev_box = "mark", None, box
+            continue
+        # paragraf arası: satırlar arasında boşluk varsa (Tesseract her satırı ayrı paragraf sayabiliyor)
+        if prev_kind == "text" and (box[0] - prev_box[1] > 0.9 * line_h if gray is not None else par != prev_par):
             out.append("")
-        out.append(" ".join(w.text for w in ws))
-        prev_par = par
+        out.append(_fix_symbols(text))
+        prev_par, prev_kind, prev_box = par, "text", box
     text = "\n".join(out).strip()
     return re.sub(r"\n{3,}", "\n\n", text)
 
@@ -60,7 +120,7 @@ def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
             page = doc.new_page(width=im.width * k, height=im.height * k)
             page.insert_image(page.rect, stream=buf.getvalue())
             words = ocr.ocr_pages(doc, [0])[0]
-        text = _text_from_words(words)
+        text = _text_from_words(words, im.convert("L"), scale=72 / ocr.OCR_DPI)
         if not text:
             progress(f"ℹ {p.name}: okunabilir yazı bulunamadı")
             continue
@@ -68,8 +128,11 @@ def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
         out.write_text(text + "\n", encoding="utf-8")
         outputs.append(out)
         texts.append(text if len(paths) == 1 else f"--- {p.name} ---\n{text}")
-        n = len(text.split())
-        progress(f"ℹ {p.name}: {n} kelime okundu")
+        n = len(text.replace(MARK, "").split())
+        marks = text.count(MARK)
+        progress(f"ℹ {p.name}: {n} kelime okundu" + (
+            f" · {marks} yerde denklem/şekil var, metinde [ ] ile işaretli (yazı tanıma bunları okuyamaz)"
+            if marks else ""))
     if not outputs:
         raise ConversionError("Görsellerde okunabilir yazı bulunamadı.")
     progress(CLIPBOARD + "\n\n".join(texts))

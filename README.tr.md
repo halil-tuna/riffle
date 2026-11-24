@@ -79,7 +79,9 @@ seçilir), **Kitapçık yap** (çift taraflı, kısa kenardan çevir, ortadan ka
 ### Görsel araçları
 
 - **Görseldeki yazıyı çıkar (OCR → panoya):** ekran görüntüsü, slayt, tahta ya da belge fotoğrafındaki yazı
-  okunur, panoya kopyalanır (Ctrl+V) ve yanına `.txt` olarak kaydedilir. Tesseract gerekir.
+  okunur, panoya kopyalanır (Ctrl+V) ve yanına `.txt` olarak kaydedilir; satır ve paragraf düzeni korunur.
+  Denklem, kesir ve şekiller okunamaz (yazı tanıma bunlar için değil): sessizce kaybolmasın diye metinde
+  yerleri `[denklem / şekil — okunamadı]` ile işaretlenir. Tesseract gerekir.
 - **Hedef boyuta indir:** "200 KB altına" gibi; başvuru formlarındaki fotoğraf/belge sınırları için en yüksek
   kaliteyi arar, gerekirse çözünürlüğü düşürür.
 - **PNG'ye çevir · Sağa / sola döndür** (telefonun yön bilgisi dikkate alınır).
@@ -194,12 +196,12 @@ Program belgenin türünü kendisi anlar:
 
 ## Kurulum — Windows 11 (kolay yol: kurulum dosyası)
 
-GitHub'daki **Releases** sayfasından `Riffle-0.9.1-kurulum.exe`'yi indir, çalıştır (yönetici yetkisi
+GitHub'daki **Releases** sayfasından `Riffle-0.9.2-kurulum.exe`'yi indir, çalıştır (yönetici yetkisi
 istemez). Sağ tık menüsü kendiliğinden eklenir; kaldırınca menü de silinir. Kurulumun son ekranındaki
 bağlantılardan isteğe bağlı bileşenleri kur: LibreOffice (Office → PDF), Tesseract (OCR, *Turkish*'i işaretle),
 Ghostscript (PDF/A).
 
-Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v0.9.1` gibi bir etiket (tag) gönderince
+Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v0.9.2` gibi bir etiket (tag) gönderince
 `.github/workflows/windows-exe.yml` Windows'ta testleri çalıştırır, PyInstaller ile paketler, paketi gerçek bir
 PDF'le dener, Inno Setup ile `…-kurulum.exe` yapar ve sürüme ekler. Elle de çalıştırılabilir
 (Actions → *Windows kurulum dosyası* → *Run workflow*; çıktı *Artifacts* altında).
@@ -298,6 +300,7 @@ riskleri (kenar boşluğu değişen sürekli bölüm sonu vb.) listeler. Taranm�
 - Windows Gezgini kayıt defteriyle kurulan bir alt menü ağacında en fazla 16 satır gösteriyor; bu yüzden PDF
   menüsü birkaç girdiye bölünür (*Riffle*, *· Dönüştür*, *· Düzenle, Sayfalar*, *· Yazdır, Küçült / Onar*).
   Ayarlar'dan kullanmadığın araçları gizlersen girdiler kendiliğinden azalır.
+- Denklem tanıma yok: görselden yazı çıkarırken denklemlerin yeri işaretlenir.
 - El yazısı OCR'ı yok (Tesseract basılı metin içindir); el yazılı sayfalar Word'e resim olarak aktarılır,
   "aranabilir yap"ta ise yalnızca çok emin olunan kelimeler eklenir (çöp metin aramayı bozmasın diye).
 - Taranmış sayfalardaki fotoğraf/imza gibi öğeler OCR'lı Word çıktısına aktarılmaz

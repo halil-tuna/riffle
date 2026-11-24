@@ -37,7 +37,7 @@ Your files never leave your computer.
 - **Word, Excel, PowerPoint and images, too** — shrink Office files by recompressing their pictures (photo-heavy
   decks fit in an e-mail again), merge Word documents into one .docx (styles, images and numbered lists kept),
   turn CSV files into clean Excel sheets (encoding and delimiter detected; `1.234,56` and `1,234.56` numbers,
-  European and US dates — ambiguous ones left as text; IDs and leading-zero numbers kept as text), slide handouts with note lines, extract pictures; for images: OCR straight to the clipboard,
+  European and US dates — ambiguous ones left as text; IDs and leading-zero numbers kept as text), slide handouts with note lines, extract pictures; for images: OCR straight to the clipboard (equations and figures it cannot read are marked, not silently dropped),
   shrink to a target size (e.g. under 200 KB), PNG, rotate.
 - **Fast** — Office files are converted in a single LibreOffice call with a persistent profile; large jobs use
   every CPU core; long PDF → Word conversions are split into page chunks and run in parallel. Every job can be
@@ -135,6 +135,7 @@ Adding a tool: a function in `tools.py` / `docops.py` plus one line in `ACTIONS`
 - Explorer shows at most 16 rows per static submenu, so the PDF menu is split into a few entries;
   hiding unused tools in Settings merges them again.
 - No handwriting OCR (Tesseract is for print); handwritten pages stay as images in Word.
+- OCR does not read equations; their places are marked in the extracted text.
 - The signature tool places a visual signature, not a cryptographic e-signature.
 
 ## License
