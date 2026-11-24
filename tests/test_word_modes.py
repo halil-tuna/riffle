@@ -280,3 +280,45 @@ def test_pen_marks_render_where_they_were(tmp_path):
         assert len(got) == 2
         for w, g in zip(want, got):
             assert abs(w.x0 - g.x0) < 2 and abs(w.y0 - g.y0) < 3
+
+
+def test_pdf_notes_become_word_comments(tmp_path):
+    """Notes written on a PDF (a highlight's text, a sticky note, a reply) become Word comments
+    on the text they were written on - also when the marked word appears earlier on the page."""
+    src = tmp_path / "notlu.pdf"
+    d = pymupdf.open()
+    p = d.new_page(width=595, height=842)
+    _text(p, (72, 100), "3.4 Koruma: bekçi ve nöbetçi", 14)
+    _text(p, (72, 130), "Bekçi (kum saati): her darbede kum saati dolmaya başlar.")
+    _text(p, (72, 146), "Nöbetçi: STM32 her milisaniyede buradayım der.")
+    d.save(src)
+    d = pymupdf.open(src)
+    p = d[0]
+    hit = p.search_for("Bekçi (kum")[0]
+    hit = pymupdf.Rect(hit.x0, hit.y0, hit.x0 + (hit.width * 5 / 10), hit.y1)   # just 'Bekçi'
+    h = p.add_highlight_annot(hit)
+    h.set_info(content="Bekçi mikrodenetleyicinin içinde mi?", title="Ömer")
+    h.update()
+    n = p.add_text_annot((60, 150), "Bunu sonra konuşalım.")
+    n.set_info(title="Yiğit")
+    n.update()
+    d.save(tmp_path / "notlu2.pdf")
+    src = tmp_path / "notlu2.pdf"
+    msgs = []
+    out = pdf_to_word([src], msgs.append)[0]
+    z = zipfile.ZipFile(out)
+    xml = z.read("word/document.xml").decode()
+    com = z.read("word/comments.xml").decode()
+    from lxml import etree
+    etree.fromstring(xml.encode()), etree.fromstring(com.encode())
+    assert 'relationships/comments"' in z.read("word/_rels/document.xml.rels").decode()
+    assert "comments+xml" in z.read("[Content_Types].xml").decode()
+    assert com.count("<w:comment ") == 2
+    assert 'w:author="Ömer"' in com and "mikrodenetleyicinin" in com
+    assert 'w:author="Yiğit"' in com and "sonra konuşalım" in com
+    ranges = dict(re.findall(r'<w:commentRangeStart w:id="(\d+)"/>(.*?)<w:commentRangeEnd w:id="\1"/>', xml, re.S))
+    covered = {k: "".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", v)) for k, v in ranges.items()}
+    omer = re.search(r'<w:comment w:id="(\d+)" w:author="Ömer"', com).group(1)
+    assert "kum saati" in covered[omer] or covered[omer].startswith("Bekçi")   # not the heading's 'bekçi'
+    assert "Koruma" not in covered[omer]
+    assert any("Word yorumu" in m or "Word comments" in m for m in msgs)

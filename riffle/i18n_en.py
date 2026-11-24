@@ -87,6 +87,8 @@ CATALOG = {
     'ℹ {0}: {1} → {2} (%{3:.0f} küçüldü)': 'ℹ {0}: {1} → {2} ({3:.0f}% smaller)',
     'pdf2docx kurulu değil: pip install pdf2docx': 'pdf2docx is not installed: pip install pdf2docx',
     "ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.": 'ℹ {0}: {1} handwritten marks (pen/ticks) were not carried over to Word.',
+    "ℹ {0}: PDF'teki {1} not Word yorumu olarak eklendi.": 'ℹ {0}: {1} notes from the PDF were added as Word comments.',
+    "ℹ {0}: {1} PDF notu metinde yeri bulunamadığı için aktarılmadı.": 'ℹ {0}: {1} PDF notes were not carried over (their place in the text was not found).',
     'ℹ {0}: metin yok (taranmış PDF olabilir, OCR gerekir).': 'ℹ {0}: no text (may be a scanned PDF; needs OCR).',
     "PDF'e çevriliyor: {0} dosya": 'Converting to PDF: {0} files',
     "PDF'e çevriliyor: {0}": 'Converting to PDF: {0}',

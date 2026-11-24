@@ -20,7 +20,8 @@ Your files never leave your computer.
   (Windows launches one process per file; Riffle gathers them into one job).
 - **PDF → Word that keeps the layout** — built on pdf2docx with a large repair layer: table widths, two-column
   articles, lost symbol fonts (μ, α, β recovered from glyph names), hyphenation, sub/superscripts, rules and
-  page flow. Highlights and pen marks (ticks, underlines) come along. Slides and two-column papers get an
+  page flow. Highlights and pen marks (ticks, underlines) come along, and notes written on the PDF become real
+  Word comments on the text they refer to. Slides and two-column papers get an
   exact-layout mode with editable text boxes.
   Measured with a round-trip benchmark (PDF → Word → PDF, text + visual + page score):
   **97.5 / 100** average over a mixed corpus of reports, articles, slides, tables, scanned pages and

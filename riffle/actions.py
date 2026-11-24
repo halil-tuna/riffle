@@ -361,6 +361,7 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
         out = unique_path(p.parent, p.stem, ".docx")
         with open_pdf(p) as d:
             ink = _collect_ink(d)
+            notes = _collect_notes(d)
         with tempfile.TemporaryDirectory(prefix="riffle_w_") as tmp:
             src = _prepare_pdf(p, Path(tmp) / "kaynak.pdf", progress)
             from . import fixed_layout, reflow
@@ -377,6 +378,8 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                 fixed_layout.convert(src, out, progress)
                 if ink:
                     progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", p.name, len(ink)))
+                if notes:
+                    progress(T("ℹ {0}: {1} PDF notu metinde yeri bulunamadığı için aktarılmadı.", p.name, len(notes)))
                 outputs.append(out)
                 continue
             with pymupdf.open(src) as d:
@@ -420,6 +423,15 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                 placed = 0
             if placed < len(ink):
                 progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", p.name, len(ink) - placed))
+        if notes:
+            try:
+                added = _add_comments(out, notes)
+            except Exception:
+                added = 0
+            if added:
+                progress(T("ℹ {0}: PDF'teki {1} not Word yorumu olarak eklendi.", p.name, added))
+            if added < len(notes):
+                progress(T("ℹ {0}: {1} PDF notu metinde yeri bulunamadığı için aktarılmadı.", p.name, len(notes) - added))
         outputs.append(out)
     return outputs
 
@@ -556,6 +568,174 @@ def _add_ink(docx: Path, items: list[dict]) -> int:
             zout.writestr(f"word/media/{rid}.png", png)
     os.replace(tmp, docx)
     return placed
+
+
+# ---------------------------------------------------------------- PDF notes → Word comments
+
+def _pdf_date(d: str) -> str:
+    """'D:20261120153000+03'00'' → '2026-11-20T15:30:00Z' (Word wants ISO; time zone dropped)."""
+    m = re.match(r"D:(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?", d or "")
+    if not m:
+        return ""
+    y, mo, da, h, mi, se = (g or "00" for g in m.groups())
+    return f"{y}-{mo}-{da}T{h}:{mi}:{se}Z"
+
+
+def _collect_notes(doc) -> list[dict]:
+    """Notes written on the PDF (the text of highlights, underlines, sticky notes, pen marks):
+    their text, author, date and the document text they refer to: the marked words for
+    highlights/underlines, otherwise the nearest line. Replies are added to their parent."""
+    notes, by_xref = [], {}
+    markup = (pymupdf.PDF_ANNOT_HIGHLIGHT, pymupdf.PDF_ANNOT_UNDERLINE, pymupdf.PDF_ANNOT_STRIKE_OUT,
+              pymupdf.PDF_ANNOT_SQUIGGLY)    # here, not at import: the installer loads this module without pymupdf
+    for pno, page in enumerate(doc):
+        words = page.get_text("words")
+        lines = []
+        for b in page.get_text("dict")["blocks"]:
+            for l in b.get("lines", []):
+                t = "".join(s["text"] for s in l["spans"]).strip()
+                if t:
+                    lines.append((pymupdf.Rect(l["bbox"]), t))
+        for a in page.annots():
+            info = a.info
+            text = (info.get("content") or "").strip()
+            if not text or a.type[0] in (pymupdf.PDF_ANNOT_POPUP, pymupdf.PDF_ANNOT_FREE_TEXT):
+                continue
+            author = (info.get("title") or "").strip()
+            if a.irt_xref and a.irt_xref in by_xref:          # a reply: goes under its parent note
+                by_xref[a.irt_xref]["replies"].append((author, text))
+                continue
+            target, context = "", ("", "")
+            if a.type[0] in markup and a.vertices:
+                v = a.vertices
+                quads = [pymupdf.Quad(v[k:k + 4]).rect for k in range(0, len(v) - 3, 4)]
+                picked = [w for w in words
+                          if any(pymupdf.Rect(w[:4]).intersect(q).get_area() > 0.5 * pymupdf.Rect(w[:4]).get_area()
+                                 for q in quads)]
+                target = " ".join(w[4] for w in picked)
+                if picked:
+                    # neighbours on the same line: a short marked word ('Bekçi') is found where it
+                    # was marked, not at its first appearance on the page
+                    first, last = picked[0], picked[-1]
+                    same = lambda w, ref: w[5] == ref[5] and w[6] == ref[6]
+                    pre = [w[4] for w in words if same(w, first) and w[7] < first[7]][-3:]
+                    post = [w[4] for w in words if same(w, last) and w[7] > last[7]][:3]
+                    context = (" ".join(pre), " ".join(post))
+            if len(_norm(target)) < 2 and lines:
+                cy = (a.rect.y0 + a.rect.y1) / 2
+                r, t = min(lines, key=lambda L: abs((L[0].y0 + L[0].y1) / 2 - cy))
+                target = t if abs((r.y0 + r.y1) / 2 - cy) < 40 else ""
+            note = {"page": pno, "y": a.rect.y0, "x": a.rect.x0, "text": text, "author": author,
+                    "date": _pdf_date(info.get("modDate") or info.get("creationDate")),
+                    "target": target, "context": context, "replies": []}
+            by_xref[a.xref] = note
+            notes.append(note)
+    notes.sort(key=lambda n: (n["page"], round(n["y"]), n["x"]))
+    return notes
+
+
+def _comment_paras(text: str) -> str:
+    from xml.sax.saxutils import escape
+    return "".join(f'<w:p><w:r><w:t xml:space="preserve">{escape(line)}</w:t></w:r></w:p>'
+                   for line in text.splitlines() or [""])
+
+
+def _add_comments(docx: Path, notes: list[dict]) -> int:
+    """Turns the PDF's notes into real Word comments (balloons in the margin, can be answered
+    and resolved), each spanning the text it was written on. Returns how many were placed."""
+    import zipfile
+    from xml.sax.saxutils import quoteattr
+    if not notes:
+        return 0
+    with zipfile.ZipFile(docx) as z:
+        names = set(z.namelist())
+        if "word/comments.xml" in names:
+            return 0
+        xml = z.read("word/document.xml").decode("utf-8")
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+        types = z.read("[Content_Types].xml").decode("utf-8")
+    body = xml.find("<w:body>")
+    runs = [(m.start(), m.end()) for m in re.finditer(r'<w:r>(?:(?!</w:r>).)*?</w:r>', xml[body:], re.S)]
+    runs = [(s + body, e + body) for s, e in runs]
+    # normalized text of the whole body, and for each character the run it came from
+    chars, owner = [], []
+    for k, (s, e) in enumerate(runs):
+        t = _norm("".join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', xml[s:e])))
+        t = t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        chars.append(t)
+        owner += [k] * len(t)
+    flat = "".join(chars)
+    starts, ends, comments, cursor = {}, {}, [], 0
+    for note in notes:
+        key = _norm(note["target"])
+        if len(key) < 2:
+            continue
+        pre, post = (_norm(t) for t in note.get("context", ("", "")))
+        i = -1
+        for a_, b_ in ((pre, post), (pre, ""), ("", post)):   # with its neighbours first
+            if a_ or b_:
+                j = flat.find(a_ + key + b_, cursor)
+                j = j if j >= 0 else flat.find(a_ + key + b_)
+                if j >= 0:
+                    i = j + len(a_)
+                    break
+        if i < 0:
+            i = flat.find(key, cursor)
+        if i < 0:
+            i = flat.find(key)
+        if i < 0 and len(key) > 30:                       # long marked passage: its start is enough
+            i = flat.find(key[:30], cursor)
+            key = key[:30]
+        if i < 0:
+            continue
+        cursor = i
+        cid = len(comments)
+        a, b = owner[i], owner[i + len(key) - 1]
+        starts.setdefault(a, []).append(cid)
+        ends.setdefault(b, []).append(cid)
+        text = note["text"] + "".join(f"\n— {who or 'PDF'}: {t}" for who, t in note["replies"])
+        author = note["author"] or "PDF"
+        initials = "".join(w[0] for w in author.split()[:3]).upper() or "P"
+        date = f' w:date="{note["date"]}"' if note["date"] else ""
+        comments.append(f'<w:comment w:id="{cid}" w:author={quoteattr(author)} w:initials={quoteattr(initials)}{date}>'
+                        f'{_comment_paras(text)}</w:comment>')
+    if not comments:
+        return 0
+    out, pos = [], 0
+    for k in sorted(set(starts) | set(ends)):
+        s, e = runs[k]
+        if k in starts:
+            out.append(xml[pos:s])
+            out.append("".join(f'<w:commentRangeStart w:id="{c}"/>' for c in starts[k]))
+            pos = s
+        if k in ends:
+            out.append(xml[pos:e])
+            out.append("".join(f'<w:commentRangeEnd w:id="{c}"/><w:r><w:commentReference w:id="{c}"/></w:r>'
+                               for c in ends[k]))
+            pos = e
+    xml = "".join(out) + xml[pos:]
+    part = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            + "".join(comments) + '</w:comments>')
+    rels = rels.replace("</Relationships>",
+                        '<Relationship Id="rIdNotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+                        'relationships/comments" Target="comments.xml"/></Relationships>')
+    types = types.replace("</Types>", '<Override PartName="/word/comments.xml" ContentType="application/'
+                          'vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>')
+    tmp = docx.with_suffix(".notes")
+    with zipfile.ZipFile(docx) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "word/document.xml":
+                data = xml.encode("utf-8")
+            elif item.filename == "word/_rels/document.xml.rels":
+                data = rels.encode("utf-8")
+            elif item.filename == "[Content_Types].xml":
+                data = types.encode("utf-8")
+            zout.writestr(item, data)
+        zout.writestr("word/comments.xml", part.encode("utf-8"))
+    os.replace(tmp, docx)
+    return len(comments)
 
 
 def _parallel_enabled() -> bool:
