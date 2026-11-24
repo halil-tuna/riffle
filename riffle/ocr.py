@@ -162,8 +162,14 @@ def _needs_cleaning(img) -> bool:
     # were averaged to grey when downscaling and made a clean page look 'faint'
     a = np.asarray(img, dtype=np.float32)[::3, ::3]
     uneven = np.percentile(bg, 95) - np.percentile(bg, 5)
-    contrast = np.percentile(a, 99) - np.percentile(a, 1)
-    return uneven > 30 or contrast < 120
+    # contrast of the ink that is there: the darkest 1 % of the WHOLE page is still paper on a
+    # sparse page (a few handwritten lines, < 1 % ink), which made clean pages look 'faint'
+    paper = np.percentile(a, 99)
+    ink = a[a < paper - 30]
+    if ink.size < 0.0005 * a.size:          # (nearly) blank: nothing to clean for
+        return bool(uneven > 30)
+    contrast = paper - np.percentile(ink, 10)
+    return bool(uneven > 30 or contrast < 120)
 
 
 def _ocr_words(exe: str, langs: str, page) -> list[Word]:
@@ -173,7 +179,12 @@ def _ocr_words(exe: str, langs: str, page) -> list[Word]:
     pix = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY, alpha=False, annots=False)
     img = Image.frombytes("L", (pix.width, pix.height), pix.samples)
     best = _tesseract(exe, langs, img, page)
-    if _mean_conf(best) >= GOOD_CONF and len(best) >= 5 and not _needs_cleaning(img):
+    needs_cleaning = _needs_cleaning(img)
+    if _mean_conf(best) >= GOOD_CONF and len(best) >= 5 and not needs_cleaning:
+        return best
+    if not needs_cleaning and _looks_handwritten(best):
+        # clean, evenly lit page that reads like handwriting/drawing: the cleaned images can't turn it
+        # into printed text (it stays a page image), they only cost ~10 s per page
         return best
     for prep in (clean_background, binarize):
         try:
@@ -341,6 +352,18 @@ def _lines(words: list[Word], vrules=()) -> list[tuple[str, "pymupdf.Rect"]]:
         lines.append((" ".join(w.text for w in ws), r))
     lines.sort(key=lambda l: (round(l[1].y0), l[1].x0))
     return lines
+
+
+def _looks_handwritten(words: list[Word]) -> bool:
+    """Far below the printed-text range of is_text_page (handwriting: good-word ratio 0.24-0.41,
+    confidence 38-55; printed scans 0.85-0.96 and 94-96). Too few words to judge → no (the cleaned
+    images may still find text: OCR is also used for searchable PDFs, where every word counts)."""
+    multi = [w for w in words if len(w.text) > 1]
+    if len(multi) < 15:
+        return False
+    ratio = sum(1 for w in multi if w.conf >= 50) / len(multi)
+    mean = sum(max(w.conf, 0) for w in words) / len(words)
+    return ratio < 0.5 and mean < 65
 
 
 def is_text_page(words: list[Word]) -> bool:

@@ -1,9 +1,9 @@
 ﻿; Riffle — Windows installer script (Inno Setup 6)
-; Build:  iscc /DAppVersion=1.0.2 packaging\installer.iss   (first python packaging\build_exe.py)
+; Build:  iscc /DAppVersion=1.0.3 packaging\installer.iss   (first python packaging\build_exe.py)
 ; No admin rights needed: installs under %LOCALAPPDATA%\Programs\Riffle, the menu is written to HKCU.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.2"
+  #define AppVersion "1.0.3"
 #endif
 
 [Setup]

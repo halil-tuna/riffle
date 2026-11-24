@@ -83,3 +83,14 @@ def test_needs_cleaning_detects_shadow():
     yy, xx = np.mgrid[0:h, 0:w]
     shadow = shadow * (1 - 0.5 * xx / w)
     assert ocr._needs_cleaning(Image.fromarray(shadow.astype(np.uint8)))
+
+
+def test_needs_cleaning_ignores_sparse_clean_page():
+    """A few dark handwritten lines on white paper (< 1 % ink) are not a 'faint' scan;
+    a page whose only ink is light grey still is."""
+    a = np.full((3300, 2550), 255, np.uint8)
+    for k in range(6):
+        a[400 + k * 300: 404 + k * 300, 300:1500] = 20      # thin dark strokes, ~0.3 % of the page
+    assert not ocr._needs_cleaning(Image.fromarray(a))
+    a[a == 20] = 200                                      # same strokes, faint
+    assert ocr._needs_cleaning(Image.fromarray(a))
