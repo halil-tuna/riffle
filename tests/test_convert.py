@@ -1,4 +1,4 @@
-"""Dönüştürmeler: Word (akan + birebir), Excel, PowerPoint, OCR, görseller, Office."""
+"""Conversions: Word (flowing + exact layout), Excel, PowerPoint, OCR, images, Office."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def docx_xml(path: Path) -> str:
         x = z.read("word/document.xml").decode("utf-8")
         for part in z.namelist():
             if part.endswith(".xml") or part.endswith(".rels"):
-                minidom.parseString(z.read(part))   # her XML parçası iyi biçimli olmalı
+                minidom.parseString(z.read(part))   # every XML part must be well-formed
     return x
 
 
@@ -90,7 +90,7 @@ def test_pdf_to_excel(pdf):
     openpyxl = pytest.importorskip("openpyxl")
     out = tools.pdf_to_excel([pdf], noop)[0]
     wb = openpyxl.load_workbook(out)
-    assert len(wb.worksheets) == 3          # her sayfada bir tablo
+    assert len(wb.worksheets) == 3          # one table per page
     rows = list(wb.worksheets[0].iter_rows(values_only=True))
     assert rows[0] == ("Ad", "Görev", "Tarih")
     assert rows[1][0] == "Kişi 1"
@@ -146,14 +146,14 @@ def test_scanned_to_word_is_editable_text_with_table(scanned):
     assert "<w:tbl>" in x, "taranmış tablo Word tablosuna dönmeli"
 
 
-# ----------------------------------------------------------------- görseller
+# ----------------------------------------------------------------- images
 
 def test_images_to_pdf_natural_order(images):
     out = images_to_pdf(images, noop)[0]
     with pymupdf.open(out) as d:
         assert len(d) == 3
         widths = [round(p.rect.width) for p in d]
-    # foto 1 (1400), foto 2 (1300), foto 10 (1200) sırası
+    # order foto 1 (1400), foto 2 (1300), foto 10 (1200)
     assert widths == sorted(widths, reverse=True)
 
 
@@ -194,7 +194,7 @@ def test_office_txt_to_pdf(work):
     assert again != out and again.exists(), "ikinci çeviri ilkini ezmemeli"
 
 
-# ----------------------------------------------------------------- OCR karar kuralları
+# ----------------------------------------------------------------- OCR decision rules
 
 def _words(confs):
     from riffle.ocr import Word
@@ -203,8 +203,8 @@ def _words(confs):
 
 def test_text_page_rule_printed_vs_handwriting():
     from riffle.ocr import is_text_page
-    printed = _words([96] * 180 + [40] * 20)            # basılı tarama: yüksek güven
-    handwriting = _words([45] * 60 + [70] * 40 + [10] * 50)   # el yazısı: dağınık, düşük
+    printed = _words([96] * 180 + [40] * 20)            # printed scan: high confidence
+    handwriting = _words([45] * 60 + [70] * 40 + [10] * 50)   # handwriting: scattered, low
     assert is_text_page(printed)
     assert not is_text_page(handwriting)
     assert not is_text_page(_words([99] * 10)), "çok az kelime → resim kalsın"

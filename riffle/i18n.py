@@ -1,14 +1,15 @@
-"""Dil desteği: Türkçe (kaynak metinler) ve İngilizce.
+"""Language support: Turkish (source strings) and English.
 
-Kaynak koddaki bütün kullanıcıya görünen metinler Türkçe yazılır ve T(...) ile sarılır:
+Every user-visible string in the source is written in Turkish and wrapped in T(...):
 
     T("Sıkıştırılıyor: {}", p.name)
 
-İngilizcede çeviri `i18n_en.CATALOG`'dan gelir; çeviri yoksa Türkçe metin gösterilir (testler
-eksik çeviriyi yakalar). Biçim yer tutucuları ({} {0} {:.1f}) çeviride de aynen bulunmalı.
+In English the translation comes from `i18n_en.CATALOG`; if a translation is missing the Turkish text is
+shown (the tests catch missing translations). Format placeholders ({} {0} {:.1f}) must appear unchanged
+in the translation.
 
-Dil seçimi: RIFFLE_LANG (testler/ekran görüntüleri) > Ayarlar ("auto" | "tr" | "en") > sistem dili.
-Sistem dili Türkçe değilse İngilizce.
+Language choice: RIFFLE_LANG (tests/screenshots) > Settings ("auto" | "tr" | "en") > system language.
+If the system language is not Turkish, English is used.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ def system_lang() -> str:
 
 
 def preference() -> str:
-    """Ayardaki değer: 'auto' | 'tr' | 'en'."""
+    """Value stored in settings: 'auto' | 'tr' | 'en'."""
     try:
         from .settings import load
         v = str(load().get("language", "auto")).lower()
@@ -63,7 +64,7 @@ def lang() -> str:
 
 
 def set_lang(code: str | None) -> None:
-    """Dili değiştir (None: ayar/sistemden yeniden belirle)."""
+    """Change the language (None: determine it again from settings/system)."""
     global _lang
     _lang = code if code in LANGS else None
 
@@ -73,7 +74,7 @@ _NOUNS = ("page|file|word|image|picture|row|column|field|table|slide|sheet|core|
 
 
 def _singular(text: str) -> str:
-    """İngilizcede '1 pages' → '1 page' (Türkçede sayıdan sonra çoğul eki yok, kaynak metin tek biçimli)."""
+    """English: '1 pages' → '1 page' (Turkish has no plural after a number, so the source text has one form)."""
     import re
     text = re.sub(rf"(?<![\d.,])1 ({_NOUNS})s\b", r"1 \1", text)
     return text.replace("1 copies", "1 copy").replace("1 duplicate copies", "1 duplicate copy")
@@ -95,5 +96,5 @@ def T(msg: str, *args, **kwargs) -> str:
 
 
 def suffix(tr_suffix: str) -> str:
-    """Çıktı dosya adı eki ('_birlesik' → '_merged')."""
+    """Output file name suffix ('_birlesik' → '_merged')."""
     return T(tr_suffix)

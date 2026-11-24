@@ -1,8 +1,8 @@
-"""Tüm dönüştürme işlemleri.
+"""All conversion operations.
 
-Her işlem bir dosya listesi alır, çıktı dosyalarının listesini döndürür.
-Çıktılar her zaman kaynak dosyanın yanına yazılır, var olan dosyanın
-üstüne asla yazılmaz (dosya (1).pdf, dosya (2).pdf ...).
+Each operation takes a list of files and returns a list of output files.
+Outputs are always written next to the source file and never overwrite an
+existing file (file (1).pdf, file (2).pdf ...).
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ try:
     import pymupdf  # PyMuPDF >= 1.24
 except ImportError:
     try:
-        import fitz as pymupdf  # type: ignore  # eski sürümler
+        import fitz as pymupdf  # type: ignore  # older versions
     except ImportError:
-        # install.py, kütüphaneler henüz kurulmadan menü listesini okuyabilsin diye.
-        # Dönüşüm sırasında .venv içinden çalıştığımız için orada her zaman kurulu olur.
+        # so install.py can read the menu list before the libraries are installed.
+        # Conversions run from the .venv, where it is always installed.
         pymupdf = None  # type: ignore
 
 PDF = ["pdf"]
@@ -35,22 +35,22 @@ OFFICE = ["doc", "docx", "odt", "rtf", "txt",
           "ppt", "pptx", "odp",
           "html", "htm"]
 IMAGES = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff", "gif", "heic", "heif"]
-FOLDER = "<klasör>"   # klasöre sağ tık işlemleri için sözde uzantı
-OOXML = ["docx", "pptx", "xlsx"]          # içi zip olan yeni Office biçimleri
+FOLDER = "<klasör>"   # pseudo extension for right-click actions on folders
+OOXML = ["docx", "pptx", "xlsx"]          # newer zip-based Office formats
 SLIDES = ["ppt", "pptx", "odp"]
 
 Progress = Callable[[str], None]
 
 
 class ConversionError(Exception):
-    """Kullanıcıya gösterilecek anlaşılır hata."""
+    """Readable error shown to the user."""
 
 
 # --------------------------------------------------------------------------
-# Yardımcılar
+# Helpers
 # --------------------------------------------------------------------------
 
-# Ayarlardaki "çıktıları Masaüstüne/şu klasöre kaydet" için: {kaynak klasör: hedef klasör} (main doldurur)
+# For the 'save outputs to the Desktop / this folder' setting: {source folder: target folder} (filled by main)
 OUTPUT_REDIRECT: dict = {}
 
 
@@ -61,7 +61,7 @@ def _redirect(folder: Path) -> Path:
         return folder
 
 
-# Çıktı adı ekleri: kaynakta Türkçe yazılır, İngilizce arayüzde karşılığına çevrilir (adın sonunda)
+# Output name suffixes: written in Turkish in the source, translated in the English UI (end of the name)
 _SUFFIX_EN = [
     (r"_cok_sikistirilmis$", "_compressed_max"), (r"_sikistirilmis$", "_compressed"), (r"_birlesik$", "_merged"),
     (r"_duzenlenmis$", "_edited"), (r"_kucuk$", "_small"), (r"_resimler$", "_images"),
@@ -89,7 +89,7 @@ def localized_stem(stem: str) -> str:
 
 
 def unique_path(folder: Path, stem: str, ext: str) -> Path:
-    """folder/stem.ext boşsa onu, doluysa 'stem (1).ext' gibi bir yol verir."""
+    """Returns folder/stem.ext if free, otherwise a path like 'stem (1).ext'."""
     folder = _redirect(folder)
     stem = localized_stem(stem)
     ext = ext if ext.startswith(".") else "." + ext
@@ -134,7 +134,7 @@ def open_pdf(path: Path, password: str | None = None):
 
 
 def sorted_by_name(paths: list[Path]) -> list[Path]:
-    # Windows Gezgini'ndeki gibi doğal sıralama: sayfa2 < sayfa10
+    # Natural sort as in Windows Explorer: page2 < page10
     import re
 
     def key(p: Path):
@@ -144,13 +144,13 @@ def sorted_by_name(paths: list[Path]) -> list[Path]:
 
 
 # --------------------------------------------------------------------------
-# PDF işlemleri
+# PDF operations
 # --------------------------------------------------------------------------
 
 def append_with_bookmark(out_doc, src_doc, title: str, level: int, toc: list) -> None:
-    """src_doc'u out_doc'un sonuna ekler; 'title' adlı yer imi ekler ve kaynağın kendi
-    içindekiler tablosunu bir alt seviyeye kaydırarak korur."""
-    start = len(out_doc) + 1                    # yer imleri 1 tabanlı sayfa numarası kullanır
+    """Appends src_doc to the end of out_doc; adds a bookmark called 'title' and keeps the source's own
+    table of contents by moving it one level down."""
+    start = len(out_doc) + 1                    # bookmarks use 1-based page numbers
     out_doc.insert_pdf(src_doc)
     toc.append([level, title, start])
     try:
@@ -162,9 +162,9 @@ def append_with_bookmark(out_doc, src_doc, title: str, level: int, toc: list) ->
 
 
 def fix_tounicode(doc) -> int:
-    """PyMuPDF'nin gömdüğü fontlarda ToUnicode 'bfrange' satırları hedefin son baytını taşırıyor
-    (ör. <0062> <00ff> <00a0>: ı = 0x131 olmalı). Standart okuyucular (Acrobat, Ghostscript) son baytı
-    sardığı için 'ı' → '1', 'ğ' → 'á' kopyalanır. Taşan aralıkları bölerek düzeltir; düzeltilen font sayısı."""
+    """In fonts embedded by PyMuPDF, ToUnicode 'bfrange' lines overflow the last byte of the target
+    (e.g. <0062> <00ff> <00a0>: ı should be 0x131). Standard readers (Acrobat, Ghostscript) wrap the last
+    byte, so 'ı' is copied as '1' and 'ğ' as 'á'. Fixes it by splitting overflowing ranges; returns the number of fixed fonts."""
     import re as _re
     fixed = 0
     seen = set()
@@ -188,7 +188,7 @@ def fix_tounicode(doc) -> int:
                 for lo, hi, dst in _re.findall(r"<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>", blk):
                     lo_i, hi_i, d = int(lo, 16), int(hi, 16), int(dst, 16)
                     while lo_i <= hi_i:
-                        room = 0xFF - (d & 0xFF)               # hedefin son baytı taşmadan kaç adım
+                        room = 0xFF - (d & 0xFF)               # how many steps before the target's last byte overflows
                         n = min(hi_i - lo_i, room, 0xFF - (lo_i & 0xFF))
                         if n < hi_i - lo_i:
                             bad = True
@@ -204,7 +204,7 @@ def fix_tounicode(doc) -> int:
                 body.append(f"{len(part)} beginbfrange")
                 body += [f"<{a:0{w}x}> <{b:0{w}x}> <{c:04x}>" for a, b, c in part]
                 body.append("endbfrange")
-            new = _re.sub(r"\d+\s+beginbfrange.*?endbfrange\s*", "", cmap, flags=_re.S)   # eski aralıkları sil
+            new = _re.sub(r"\d+\s+beginbfrange.*?endbfrange\s*", "", cmap, flags=_re.S)   # delete the old ranges
             new = new.replace("endcmap", "\n".join(body) + "\nendcmap", 1)
             doc.update_stream(tu, new.encode("latin-1"))
             fixed += 1
@@ -215,7 +215,7 @@ def save_with_toc(out_doc, toc: list, path: Path) -> None:
     if toc:
         try:
             out_doc.set_toc(toc)
-        except Exception:                        # bozuk kaynak içindekiler → yalnızca dosya başlıkları
+        except Exception:                        # broken source table of contents → file titles only
             out_doc.set_toc([e for e in toc if e[0] == 1])
     out_doc.save(path, garbage=3, deflate=True)
 
@@ -223,7 +223,7 @@ def save_with_toc(out_doc, toc: list, path: Path) -> None:
 def merge_pdfs(paths: list[Path], progress: Progress, ordered: bool = False, **_) -> list[Path]:
     if len(paths) < 2:
         raise ConversionError(T("Birleştirmek için en az 2 PDF seç."))
-    if not ordered:                      # sıralama penceresinden geldiyse kullanıcının sırası korunur
+    if not ordered:                      # if it came from the order window, keep the user's order
         paths = sorted_by_name(paths)
     out_doc, toc = pymupdf.open(), []
     for p in paths:
@@ -255,9 +255,9 @@ def split_pdf(paths: list[Path], progress: Progress, **_) -> list[Path]:
 
 
 COMPRESS_LEVELS = {
-    # seviye: (bu dpi'nin üstündekiler küçültülür, hedef dpi, JPEG kalitesi)
-    "normal": (160, 150, 70),   # ekranda okumak ve yazdırmak için yeterli
-    "strong": (110, 96, 50),    # e-posta / sisteme yükleme sınırları için; yazdırmada bulanık
+    # level: (images above this dpi are downsampled, target dpi, JPEG quality)
+    "normal": (160, 150, 70),   # good enough for reading on screen and printing
+    "strong": (110, 96, 50),    # for e-mail / upload limits; blurry when printed
 }
 
 
@@ -276,7 +276,7 @@ def compress_pdf(paths: list[Path], progress: Progress, level: str = "normal", *
                      deflate_fonts=True, clean=True, use_objstms=1)
         after = out.stat().st_size
         if after >= before:
-            # Kazanç yoksa daha büyük dosya bırakma
+            # If there is no gain, don't leave a bigger file
             shutil.copy2(p, out)
             progress(T("ℹ {0} zaten optimize, küçültülemedi.", p.name))
         else:
@@ -347,13 +347,13 @@ def pdf_to_jpg(paths: list[Path], progress: Progress, dpi: int = 150, **_) -> li
 
 
 def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) -> list[Path]:
-    """mode: "auto" (slayt ve iki sütunlu makale → birebir düzen, gerisi akan metin) · "flow" (hep akan)."""
+    """mode: "auto" (slides and two-column papers → exact layout, everything else flowing text) · "flow" (always flowing)."""
     try:
         from pdf2docx import Converter
     except ImportError:
         raise ConversionError(T("pdf2docx kurulu değil: pip install pdf2docx"))
     import logging
-    logging.getLogger().setLevel(logging.ERROR)  # pdf2docx çok konuşkan
+    logging.getLogger().setLevel(logging.ERROR)  # pdf2docx is very chatty
     outputs = []
     for p in paths:
         progress(T("Word'e çevriliyor: {0} (uzun sürebilir)", p.name))
@@ -369,7 +369,7 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                     elif reflow.is_two_column(probe):
                         kind = T("iki sütunlu belge")
             if kind:
-                # Slayt ve iki sütunlu makale: akan metinde satırlar/sayfalar kayıyor, birebir düzen kullan
+                # Slides and two-column papers: lines/pages shift in flowing text, use the exact layout
                 progress(T("ℹ {0}: {1} algılandı, birebir düzen kullanıldı (yazılar yerinde düzenlenebilir). Akan metin için: 'PDF → Word (akan metin)'.", p.name, kind))
                 fixed_layout.convert(src, out, progress)
                 outputs.append(out)
@@ -384,7 +384,7 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                     progress(T("ℹ {0}: {1} figür resim olarak aktarıldı.", p.name, rescued))
             from .textfix import patched_text
             from . import parallel
-            # 0.7: ortalanmış başlık + alt başlığın tek satıra yapışmasını önler
+            # 0.7: keeps a centred title and subtitle from being glued onto one line
             settings = {"line_break_width_ratio": 0.7, "page_margin_factor_top": 1.0}
             with pymupdf.open(src) as probe:
                 n_pages = len(probe)
@@ -394,7 +394,7 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                     fixes = parallel.word_parallel(src, out, n_pages, settings, Path(tmp), progress)
                 except parallel.Cancelled:
                     raise
-                except Exception:                   # süreç havuzu kurulamadı: sıradan yola düş
+                except Exception:                   # process pool could not be created: fall back to sequential
                     fixes = None
             else:
                 fixes = None
@@ -421,7 +421,7 @@ def _parallel_enabled() -> bool:
 
 
 def _run_cancellable(cmd, timeout: float, flags: int = 0):
-    """subprocess.run gibi, ama İptal'e basılınca dış programı (LibreOffice, Ghostscript) durdurur."""
+    """Like subprocess.run, but stops the external program (LibreOffice, Ghostscript) when Cancel is pressed."""
     from .parallel import CANCEL, Cancelled
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=flags)
     t0 = time.time()
@@ -441,12 +441,12 @@ def _run_cancellable(cmd, timeout: float, flags: int = 0):
 
 
 def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
-    """pdf2docx'e vermeden önce PDF'i hazırlar. Değişiklik yoksa orijinali döndürür.
+    """Prepares the PDF before handing it to pdf2docx. Returns the original if nothing changes.
 
-    - El yazısı (Ink) notlarını kaldırır: kalemle atılan tikler Word'de serbest
-      şekil olup metnin yerleşimini bozuyor. Vurgulamalar (Highlight) korunur.
-    - Metni olmayan sayfaları (taranmış, el yazısı, çizim) sayfa resmine çevirir:
-      pdf2docx vektör çizgileri atlıyor; aksi hâlde sayfa boş ya da kayıp çıkıyor.
+    - Removes handwritten (Ink) annotations: pen ticks become free shapes in Word
+      and break the text layout. Highlights are kept.
+    - Turns pages without text (scanned, handwritten, drawings) into page images:
+      pdf2docx skips vector lines, otherwise the page comes out empty or incomplete.
     """
     doc = open_pdf(src)
     try:
@@ -457,24 +457,24 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
                     page.delete_annot(annot)
                     ink += 1
         textless = {i for i, page in enumerate(doc) if len(page.get_text().strip()) < 10}
-        # Kırpılmış sayfalar (büyük tuvalden kesilmiş, ör. dergi PDF'leri): pdf2docx
-        # kırpma ofsetini hesaba katmıyor, resimler 'sayfa dışında' kalıp düşüyor.
+        # Cropped pages (cut from a larger canvas, e.g. magazine PDFs): pdf2docx
+        # ignores the crop offset, images end up 'outside the page' and get dropped.
         cropped = {i for i, page in enumerate(doc)
                    if page.cropbox != page.mediabox or page.mediabox.x0 or page.mediabox.y0}
         if not ink and not textless and not cropped:
             return src
         if ink:
             progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", src.name, ink))
-        # Metinsiz sayfalar: Tesseract varsa OCR → metin ağırlıklıysa düzenlenebilir metin
+        # Pages without text: OCR if Tesseract is available → editable text if it is mostly text
         ocr_words, ocr_used = {}, set()
         if textless:
             from . import ocr
             try:
                 ocr_words = ocr.ocr_pages(doc, sorted(textless), progress)
                 ocr_used = {i for i, w in ocr_words.items() if ocr.is_text_page(w)}
-                # eğik basılı taramayı düzelt ve yeniden oku: satırlar ve tablo çizgileri eksenlere
-                # otursun (eğik çizgiler Word'de kayık, ince ince bölünmüş sütunlu tablolar üretiyordu).
-                # Yalnızca metin sayfalarında: el yazısında eğiklik ölçümü güvenilmez.
+                # straighten a skewed printed scan and read it again: lines and table rules should
+                # sit on the axes (skewed lines produced tilted tables split into thin columns in Word).
+                # Text pages only: skew measurement is unreliable on handwriting.
                 from .docops import _rotate_content, skew_angle
                 skewed = []
                 for i in sorted(ocr_used):
@@ -500,7 +500,7 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
                     new = out.new_page(width=page.rect.width, height=page.rect.height)
                     new.insert_image(new.rect, stream=pix.tobytes("jpeg", jpg_quality=82))
                 elif i in cropped:
-                    # sayfayı kırpılmış hâliyle sıfır kökenli yeni sayfaya yerleştir
+                    # place the page, as cropped, on a new page with a zero origin
                     new = out.new_page(width=page.rect.width, height=page.rect.height)
                     new.show_pdf_page(new.rect, doc, i)
                 else:
@@ -518,17 +518,17 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
         doc.close()
 
 
-_SLACK = 1440  # twip = 1 inç (2,5 cm) pay
-_CELL_BEFORE = 40  # twip: serbest satırlarda hücre içi üst boşluk sınırı
-_MIN_CELL = 1000  # twip ≈ 1,8 cm: bundan dar hücreli satırlar sabit kalır
+_SLACK = 1440  # twips = 1 inch (2.5 cm) margin
+_CELL_BEFORE = 40  # twips: cap on the top spacing inside cells of unlocked rows
+_MIN_CELL = 1000  # twips ≈ 1.8 cm: rows with cells narrower than this keep their fixed height
 
 
 def _cap_cell_before(tc: str, row_h: int) -> str:
     import re
     if "<w:tbl>" in tc:
         return tc
-    # boş hücre (birleştirilmiş sütun) belge varsayılanını alıyor: 10 pt 'sonra' boşluğu
-    # tek satırlık satırları ~4 pt şişirip tabloyu sonraki sayfaya taşırıyor
+    # an empty cell (merged column) takes the document default: 10 pt 'after' spacing
+    # swells single-line rows by ~4 pt and pushes the table onto the next page
     tc = tc.replace("<w:p/>", '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="200" w:lineRule="exact"/>'
                               '<w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>')
     content = 0
@@ -540,7 +540,7 @@ def _cap_cell_before(tc: str, row_h: int) -> str:
 
     def cap(b):
         v = int(b.group(1))
-        if first[0]:                       # yalnızca ilk paragrafın üst boşluğu iç boşluktur
+        if first[0]:                       # only the first paragraph's top spacing is the cell padding
             first[0] = False
             return f'w:before="{min(v, room)}"'
         return f'w:before="{min(v, _CELL_BEFORE)}"'
@@ -549,58 +549,58 @@ def _cap_cell_before(tc: str, row_h: int) -> str:
 
 def _fix_layout_xml(xml: str, info=None) -> str:
     import re
-    # 1) Tablo satırları 'tam yükseklik' → 'en az': yazı uzarsa son satır kesilmesin.
-    #    YALNIZCA tüm hücreleri geniş satırlarda: slaytlardaki dar hücreler
-    #    (harfler alt alta) serbest kalırsa sayfa onlarca satır uzuyor.
+    # 1) Table rows 'exact height' → 'at least': the last line is not cut if the text grows.
+    #    ONLY in rows where all cells are wide: narrow cells on slides
+    #    (letters stacked) make the page dozens of lines longer when unlocked.
     def unclip_row(m: re.Match) -> str:
         tr = m.group(0)
-        if "<w:tbl>" in tr:  # iç içe tablo: dokunma
+        if "<w:tbl>" in tr:  # nested table: leave alone
             return tr
         widths = [int(w) for w in re.findall(r'<w:tcW[^>]*w:w="(\d+)"', tr)]
         if widths and min(widths) >= _MIN_CELL and 'w:hRule="exact"' in tr:
             tr = tr.replace('<w:trHeight w:hRule="exact"', '<w:trHeight w:hRule="atLeast"')
-            # pdf2docx metni hücre içinde 'önce boşluk' ile konumluyor; satır serbest
-            # kalınca bu boşluk satırı şişirip sayfayı taşırıyor. Satırın en az
-            # yüksekliği zaten korunduğu için boşluğu küçült.
-            # Ama tamamen silmek yazıyı hücrenin tepesine yapıştırıyor (asıl belgede
-            # hücre iç boşluğu var): hücredeki satırların sığacağı kadarını koru.
+            # pdf2docx positions text in a cell with 'space before'; once the row is
+            # unlocked this spacing swells the row and pushes the page over. The row's
+            # minimum height is kept anyway, so shrink the spacing.
+            # But removing it entirely sticks the text to the top of the cell (the original
+            # has cell padding): keep as much as the lines in the cell leave room for.
             h = int((re.search(r'<w:trHeight[^>]*w:val="(\d+)"', tr) or [0, 0])[1])
             tr = re.sub(r'<w:tc>.*?</w:tc>', lambda c: _cap_cell_before(c.group(0), h), tr, flags=re.S)
         return tr
     xml = re.sub(r'<w:tr[ >].*?</w:tr>', unclip_row, xml, flags=re.S)
 
-    # 1b) pdf2docx tablo ızgarasını (gridCol) tüm sütunlara EŞİT yazıyor, gerçek
-    #     genişlikler hücrelerde (tcW). Sabit düzenli tabloda Word/LibreOffice
-    #     ızgarayı kullandığı için geniş sütun daralıyor, metin alt alta kayıyor.
+    # 1b) pdf2docx writes the table grid (gridCol) with EQUAL widths for all columns; the real
+    #     widths are in the cells (tcW). Word/LibreOffice use the grid in fixed-layout tables,
+    #     so a wide column gets narrow and the text wraps down.
     xml = re.sub(r'<w:tbl>.*?</w:tbl>', _fix_table_grid, xml, flags=re.S)
 
-    # 1c) Şemaya aykırı değerler: ondalıklı ölçüler ("6.0", "14.000000000000057")
-    #     ve '#' önekli renkler. Word bunlarda "okunamayan içerik" uyarısı verebiliyor.
+    # 1c) Values that violate the schema: decimal measures ("6.0", "14.000000000000057")
+    #     and colours with a '#' prefix. Word may report "unreadable content" for these.
     xml = re.sub(r'(w:(?:w|sz|space|val)=")(-?\d+)\.\d+"', r'\1\2"', xml)
     xml = re.sub(r'(w:(?:color|fill)=")#([0-9A-Fa-f]{6})"', r'\1\2"', xml)
 
-    # 1c2) Dolu biten sayfalarda metni akıt, üst/alt bilgileri sil (bkz. reflow.py)
+    # 1c2) Let text flow on pages that end full, remove headers/footers (see reflow.py)
     if info is not None:
         from . import reflow
         xml = reflow.reflow_sections(xml, info)
 
-    # 1d) Çok sütunlu sayfalar: pdf2docx sol ve sağ sütunu ayrı bölüm yapıp
-    #     'sonraki sütun' bölüm sonu kullanıyor. LibreOffice bunu sayfa sonu
-    #     sayıyor (her PDF sayfası 2 sayfa oluyor). Tek bölüm + sütun sonu yap.
+    # 1d) Multi-column pages: pdf2docx makes the left and right columns separate sections
+    #     with a 'next column' section break. LibreOffice treats it as a page break
+    #     (every PDF page becomes 2 pages). Make it one section + a column break.
     xml = _merge_column_sections(xml)
 
-    # 2) pdf2docx her PDF sayfasını ayrı bölüm yapıyor ve sayfa sonundaki öğeyi
-    #    (genelde sayfa numarası) büyük bir 'önce boşluk' ile aşağı itiyor.
-    #    Yukarıdaki satırlar uzayınca bu öğe tek başına yeni sayfaya taşıyor.
-    #    Bölüm sonundan hemen önceki paragrafın boşluğunu 1 inç kısalt.
+    # 2) pdf2docx makes every PDF page a separate section and pushes the item at the end
+    #    of the page (usually the page number) down with a large 'space before'.
+    #    When the lines above grow, this item moves to a new page on its own.
+    #    Shorten the spacing of the paragraph right before the section break by 1 inch.
     def shrink(m: re.Match) -> str:
         before = int(m.group(2))
         if before >= 2 * _SLACK:
             return f'{m.group(1)}{before - _SLACK}"'
         return m.group(0)
 
-    #    Ara bölümler '<w:p><w:pPr><w:sectPr>' ile, SON bölüm ise gövdenin
-    #    sonunda '</w:p><w:sectPr' ile biter; ikisi de ele alınmalı.
+    #    Middle sections end with '<w:p><w:pPr><w:sectPr>', the LAST section with
+    #    '</w:p><w:sectPr' at the end of the body; both must be handled.
     sect = re.compile(r'<w:p><w:pPr><w:sectPr>|(?<=</w:p>)<w:sectPr[ >]')
     out, pos = [], 0
     for m in sect.finditer(xml):
@@ -612,20 +612,20 @@ def _fix_layout_xml(xml: str, info=None) -> str:
     out.append(xml[pos:])
     xml = "".join(out)
 
-    # 3) Bölüm sonu paragrafının kendisi bir satır yer kaplamasın
+    # 3) The section break paragraph itself should not take up a line
     xml = xml.replace('<w:p><w:pPr><w:sectPr>',
                       '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:sectPr>')
 
-    # 3b) Boşluksuz PDF'ler (eski Distiller vb.): kelimeler ayrı koşu, aralarında
-    #     boşluk karakteri yok → Word'de 'Electricaldischargemachining'.
+    # 3b) PDFs without spaces (old Distiller etc.): words are separate runs with no
+    #     space character between them → 'Electricaldischargemachining' in Word.
     xml = _restore_spaces(xml)
-    # textfix'in satır sonu tiresi yerine bıraktığı görünmez işaret: artık gerek yok
+    # invisible mark textfix leaves in place of a line-end hyphen: no longer needed
     xml = xml.replace("\u2060", "")
     xml = re.sub(r"<w:t( xml:space=\"preserve\")?></w:t>", "<w:t/>", xml)
 
-    # 4) Madde/numara işaretleri: araya sekme koy, birleşmiş maddeleri ayır
+    # 4) Bullet/number marks: insert a tab, split merged items
     xml = re.sub(r'<w:p(?: [^>]*)?>.*?</w:p>', lambda m: _fix_list_para(m.group(0)), xml, flags=re.S)
-    # 5) Kaybolan yatay ayırıcı çizgiler → paragraf kenarlığı
+    # 5) Lost horizontal separator lines → paragraph borders
     if info is not None and getattr(info, "rules", None):
         xml = _apply_rules(xml, info.rules)
     return xml
@@ -639,9 +639,9 @@ _PPR_AFTER_BDR = ("shd", "tabs", "suppressAutoHyphens", "kinsoku", "wordWrap", "
 
 
 def _apply_rules(xml: str, rules) -> str:
-    """Her çizgiyi metni eşleşen paragrafa alt/üst kenarlık olarak ekler (belge sırasıyla)."""
+    """Adds each line as a bottom/top border to the paragraph whose text matches (in document order)."""
     from .reflow import _norm_text
-    # tablo hücresindeki paragrafa kenarlık hücrenin yarısında kalır: tablolar hariç
+    # a border on a paragraph in a table cell stops at half the cell: skip tables
     tbl = [(m.start(), m.end()) for m in re.finditer(r"<w:tbl>.*?</w:tbl>", xml, re.S)]
     paras = [m for m in re.finditer(r"<w:p(?: [^>]*)?>.*?</w:p>", xml, re.S)
              if not any(a <= m.start() < b for a, b in tbl)]
@@ -653,7 +653,7 @@ def _apply_rules(xml: str, rules) -> str:
         key = r.text[-30:] if r.side == "bottom" else r.text[:30]
         if len(key) < 3:
             continue
-        order = list(range(start, len(paras))) + list(range(0, start))   # sütunlarda sıra bozulabilir
+        order = list(range(start, len(paras))) + list(range(0, start))   # order may break in columns
         ok = lambda i: key in norm[i] and (i, r.side) not in used
         hit = next((i for i in order if ok(i) and
                     (norm[i].endswith(key) if r.side == "bottom" else norm[i].startswith(key))), None)
@@ -668,8 +668,8 @@ def _apply_rules(xml: str, rules) -> str:
         return xml
 
     def less_before(p: str, twips: int) -> str:
-        """Kenarlık metinle çizgi arasını paragrafa ekler; aynı miktar komşu boşluktan düşülür ki
-        sayfanın geri kalanı aşağı kaymasın."""
+        """The border adds the gap between text and line to the paragraph; the same amount is taken from
+        the neighbouring spacing so the rest of the page does not move down."""
         m = re.search(r'(<w:spacing\b[^>]*?w:before=")(\d+)(")', p)
         if not m:
             return p
@@ -695,7 +695,7 @@ def _apply_rules(xml: str, rules) -> str:
                     p = less_before(p, extra)
             bdr = "<w:pBdr>" + sides.get("top", "") + sides.get("bottom", "") + "</w:pBdr>"
             if '<w:jc w:val="center"/>' in p:
-                # ortalı başlıkta pdf2docx iki yandan girinti veriyor; kenarlık o kadar kısa kalmasın
+                # pdf2docx indents centred headings on both sides; don't let the border be that short
                 p = re.sub(r'(<w:ind\b[^>]*?)w:left="\d+"', r'\1w:left="0"', p, count=1)
                 p = re.sub(r'(<w:ind\b[^>]*?)w:right="\d+"', r'\1w:right="0"', p, count=1)
             if "<w:pPr>" not in p and "<w:pPr " not in p:
@@ -717,7 +717,7 @@ def _apply_rules(xml: str, rules) -> str:
 
 def _fix_table_grid(m: re.Match) -> str:
     tbl = m.group(0)
-    if tbl.count("<w:tbl>") > 1:  # iç içe tablo: dokunma
+    if tbl.count("<w:tbl>") > 1:  # nested table: leave alone
         return tbl
     grid = re.search(r"<w:tblGrid>(.*?)</w:tblGrid>", tbl, re.S)
     if not grid:
@@ -748,8 +748,8 @@ def _merge_column_sections(xml: str) -> str:
         multi = re.search(r'<w:cols w:num="([2-9])"', lt)
         if (multi and 'w:val="nextColumn"' in rt and re.search(r'<w:cols w:num="' + multi.group(1) + '"', rt)
                 and 'w:val="nextColumn"' not in lt):
-            out.append(xml[pos:left.start()])           # sol sütun içeriği (bölüm sonu silinir)
-            mid = xml[left.end():right.start()]          # sağ sütun içeriği
+            out.append(xml[pos:left.start()])           # left column content (section break is removed)
+            mid = xml[left.end():right.start()]          # right column content
             if mid.startswith("<w:p>") or mid.startswith("<w:p "):
                 k = mid.find("</w:pPr>")
                 end_first = mid.find("</w:p>")
@@ -774,7 +774,7 @@ _T = re.compile(r'(<w:t(?: [^>]*)?>)(.*?)(</w:t>)', re.S)
 
 
 def _restore_spaces(xml: str) -> str:
-    """Belge 'boşluksuz' ise ardışık kelime koşularının arasına boşluk ekler."""
+    """If the document has no spaces, inserts spaces between consecutive word runs."""
     paras = re.findall(r'<w:p[ >].*?</w:p>', xml, re.S)
     pairs = glued = 0
     for p in paras[:400]:
@@ -785,7 +785,7 @@ def _restore_spaces(xml: str) -> str:
                 if a[-1].isalnum() and b[0].isalnum():
                     glued += 1
     if pairs < 50 or glued / pairs < 0.5:
-        return xml  # normal belge: dokunma
+        return xml  # normal document: leave alone
 
     def fix_para(m: re.Match) -> str:
         p = m.group(0)
@@ -798,8 +798,8 @@ def _restore_spaces(xml: str) -> str:
             if prev is not None and txt and prev and not prev[-1].isspace() and not txt[0].isspace():
                 rs = max(p.rfind("<w:r>", 0, t.start()), p.rfind("<w:r ", 0, t.start()))
                 if prev[-1] in "-\u2060" or "w:vertAlign" in p[rs:t.start()]:
-                    # alt/üst simge ("TiO" + "₂") bitişik kalır
-                    # satır sonu tiresi textfix'te çözüldü (U+2060 = birleştir); kalan '-' gerçek birleşik kelime
+                    # subscript/superscript ("TiO" + "₂") stays attached
+                    # line-end hyphens were resolved in textfix (U+2060 = join); a remaining '-' is a real compound word
                     out.append(p[pos:t.start()])
                 elif not re.match(r'[.,;:!?)\]]', txt) and prev[-1] not in "([/":
                     out.append(p[pos:t.start()])
@@ -830,9 +830,9 @@ def _run_text(run: str) -> str:
 
 
 def _fix_list_para(p: str) -> str:
-    """'•' ya da '1.' ayrı bir koşu (run) olarak gelip metne yapışıyorsa sekme ekler;
-    paragrafın ortasında yeni bir '•' varsa orada paragrafı ikiye böler."""
-    if len(re.findall(r"<w:p[ >]", p)) > 1 or "<w:sectPr" in p:  # iç içe paragraf (metin kutusu) vb.: dokunma
+    """If a '•' or '1.' arrives as a separate run stuck to the text, inserts a tab;
+    if there is a new '•' in the middle of a paragraph, splits the paragraph there."""
+    if len(re.findall(r"<w:p[ >]", p)) > 1 or "<w:sectPr" in p:  # nested paragraph (text box) etc.: leave alone
         return p
     m = re.match(r'(<w:p(?: [^>]*)?>)(<w:pPr>.*?</w:pPr>)?(.*)</w:p>$', p, re.S)
     if not m:
@@ -849,8 +849,8 @@ def _fix_list_para(p: str) -> str:
     if not is_list:
         return p
 
-    # pdf2docx alt satırları başa <w:tab/> koyarak hizalıyor; asılı girintide bu
-    # sekme metni fazladan itiyor. Satır içi sekmeleri boşluğa çevir.
+    # pdf2docx aligns wrapped lines by putting <w:tab/> at their start; with a hanging
+    # indent this tab pushes the text further. Turn in-line tabs into spaces.
     tab_run = re.compile(r'<w:r(?: [^>]*)?>(?:<w:rPr>.*?</w:rPr>)?<w:tab/></w:r>', re.S)
     cleaned = []
     for t in tokens:
@@ -864,7 +864,7 @@ def _fix_list_para(p: str) -> str:
     run_idx = [i for i, t in enumerate(tokens) if _RUN.fullmatch(t)]
     first = run_idx[0]
 
-    # Ortadaki madde işaretlerinden (numaralı listede numaralardan) böl
+    # Split at bullets in the middle (numbers in a numbered list)
     numbered = bool(_NUMBER.match(first_txt))
     cuts = [i for i in run_idx[1:]
             if _run_text(tokens[i]).strip() in _BULLETS
@@ -875,15 +875,15 @@ def _fix_list_para(p: str) -> str:
         prev = c
     groups.append(tokens[prev:])
 
-    # Tüm maddelere aynı asılı girinti: işaret kendi yerinde kalır, metin ve
-    # alt satırlar işaretten sabit uzaklıkta hizalanır. (pdf2docx her maddeye
-    # farklı sekme konumu veriyor; sonuç dağınık görünüyordu.)
+    # Same hanging indent for all items: the mark stays in place, the text and
+    # wrapped lines align at a fixed distance from the mark. (pdf2docx gives each item
+    # a different tab position; the result looked messy.)
     ind = re.search(r'<w:ind ([^>]*?)/>', ppr)
     if ind:
         attrs = dict(re.findall(r'w:(\w+)="(-?\d+)"', ind.group(1)))
         left = int(attrs.get("left", 0))
         marker = left - int(attrs.get("hanging", 0)) + int(attrs.get("firstLine", 0))
-        gap = 284 if first_txt in _BULLETS else 397  # 0,5 cm / 0,7 cm (twip)
+        gap = 284 if first_txt in _BULLETS else 397  # 0.5 cm / 0.7 cm (twips)
         right = attrs.get("right", "0")
         ppr = ppr.replace(ind.group(0),
                           f'<w:ind w:left="{max(marker, 0) + gap}" w:right="{right}" w:hanging="{gap}"/>')
@@ -900,7 +900,7 @@ def _fix_list_para(p: str) -> str:
 
 
 def _unclip_table_rows(docx: Path, info=None) -> None:
-    """pdf2docx çıktısındaki yerleşim sorunlarını düzelt (bkz. _fix_layout_xml)."""
+    """Fix layout problems in pdf2docx output (see _fix_layout_xml)."""
     import zipfile
     tmp = docx.with_suffix(".tmp")
     with zipfile.ZipFile(docx) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -927,7 +927,7 @@ def pdf_to_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
 
 
 # --------------------------------------------------------------------------
-# Görsel → PDF
+# Image → PDF
 # --------------------------------------------------------------------------
 
 def images_to_pdf(paths: list[Path], progress: Progress, ordered: bool = False, **_) -> list[Path]:
@@ -941,7 +941,7 @@ def images_to_pdf(paths: list[Path], progress: Progress, ordered: bool = False, 
             pdf_bytes = img.convert_to_pdf()
             img.close()
         except Exception:
-            # PyMuPDF'in açamadığı formatlar (HEIC, bazı webp) için Pillow
+            # Pillow for formats PyMuPDF can't open (HEIC, some webp)
             import io
             from .tools import _open_image
             buf = io.BytesIO()
@@ -976,7 +976,7 @@ def _find_soffice() -> str | None:
 
 
 def _office_com_to_pdf(src: Path, out: Path) -> bool:
-    """Windows'ta MS Office kuruluysa onunla çevir. Başarılıysa True."""
+    """Convert with MS Office if it is installed on Windows. True on success."""
     try:
         import win32com.client  # pywin32
     except ImportError:
@@ -1016,9 +1016,9 @@ def _office_com_to_pdf(src: Path, out: Path) -> bool:
 
 
 class _LoProfile:
-    """LibreOffice kullanıcı profili. Her seferinde yeni profil açmak (eski davranış) özellikle
-    Windows'ta her dönüşüme birkaç saniye ekliyordu; artık kalıcı profil kullanılır. Aynı anda
-    ikinci bir dönüşüm çalışıyorsa (profil kilitli) o işlem geçici profile düşer."""
+    """LibreOffice user profile. Creating a new profile every time (the old behaviour) added a few seconds
+    to each conversion, especially on Windows; a persistent profile is used now. If a second conversion
+    is running at the same time (profile locked), that run falls back to a temporary profile."""
 
     def __enter__(self):
         self.tmp = None
@@ -1030,7 +1030,7 @@ class _LoProfile:
             lock = base.with_suffix(".kilit")
             try:
                 if lock.exists() and time.time() - lock.stat().st_mtime > 900:
-                    lock.unlink()                       # çöken işlemden kalmış eski kilit
+                    lock.unlink()                       # stale lock left over from a crashed run
                 fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.close(fd)
                 self.lock = lock
@@ -1069,13 +1069,13 @@ _AFTER_PAGESETUP = ("headerFooter", "rowBreaks", "colBreaks", "customProperties"
 
 
 def _fit_sheet_xml(xml: str) -> str:
-    """Excel sayfasını yazdırırken sütunlar tek sayfa genişliğine sığsın (yükseklik serbest). Kullanıcının
-    kendi ölçek/sığdırma ayarı varsa dokunulmaz. Geniş tablolarda kâğıt yatay olur."""
+    """When printing an Excel sheet, the columns fit one page width (height is free). The user's own
+    scale/fit setting is left alone. For wide tables the paper is landscape."""
     if re.search(r"<pageSetup\b[^>]*\b(scale|fitToWidth|fitToHeight)=", xml) or "fitToPage=\"1\"" in xml:
         return xml
     dim = re.search(r'<dimension ref="[A-Z]+\d+:([A-Z]+)\d+"', xml)
     wide = dim is not None and _col_index(dim.group(1)) > 8
-    # 1) <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr> (worksheet'in ilk çocuğu)
+    # 1) <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr> (first child of worksheet)
     m = re.search(r"<sheetPr\b([^>]*?)(/?)>", xml)
     if m is None:
         xml = re.sub(r"(<worksheet\b[^>]*>)", r'\1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>', xml, count=1)
@@ -1084,7 +1084,7 @@ def _fit_sheet_xml(xml: str) -> str:
     elif re.search(r"<pageSetUpPr\b", xml):
         xml = re.sub(r"<pageSetUpPr\b", '<pageSetUpPr fitToPage="1"', xml, count=1)
     else:
-        # tabColor / outlinePr'den sonra gelmeli
+        # must come after tabColor / outlinePr
         end = xml.index("</sheetPr>")
         xml = xml[:end] + '<pageSetUpPr fitToPage="1"/>' + xml[end:]
     # 2) <pageSetup fitToWidth="1" fitToHeight="0" .../>
@@ -1109,7 +1109,7 @@ def _fit_sheet_xml(xml: str) -> str:
 
 
 def _excel_fit_width(src: Path, dst: Path) -> None:
-    """src .xlsx'in sayfaları 'genişliğe sığdır' ayarlı kopyası (dosyanın geri kalanına dokunmadan)."""
+    """Copy of the src .xlsx with its sheets set to 'fit to width' (the rest of the file is untouched)."""
     import zipfile
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
         for info in zin.infolist():
@@ -1120,8 +1120,8 @@ def _excel_fit_width(src: Path, dst: Path) -> None:
 
 
 def office_to_pdf_many(paths: list[Path], outdir: Path, progress: Progress = lambda m: None) -> dict:
-    """Birden çok Office dosyasını TEK LibreOffice çağrısıyla PDF'e çevirir (her dosya için programı
-    yeniden başlatmak en yavaş kısım). {kaynak: pdf} döndürür; çevrilemeyenler sözlükte olmaz."""
+    """Converts several Office files to PDF with ONE LibreOffice call (restarting the program for each
+    file is the slowest part). Returns {source: pdf}; files that failed are not in the dict."""
     paths = list(dict.fromkeys(Path(p) for p in paths))
     if not paths:
         return {}
@@ -1132,11 +1132,11 @@ def office_to_pdf_many(paths: list[Path], outdir: Path, progress: Progress = lam
         src_dir = outdir / "_kaynak"
         src_dir.mkdir(exist_ok=True)
         staged = []
-        for i, p in enumerate(paths):                  # aynı adlı dosyalar çakışmasın: sıra numarası
+        for i, p in enumerate(paths):                  # files with the same name must not collide: sequence number
             dst = src_dir / f"{i:03d}{p.suffix.lower()}"
             if p.suffix.lower() in (".xlsx", ".xlsm"):
                 try:
-                    _excel_fit_width(p, dst)      # geniş tablolar sağdan bölünüp ayrı sayfalara taşmasın
+                    _excel_fit_width(p, dst)      # wide tables should not be split on the right onto separate pages
                 except Exception:
                     shutil.copyfile(p, dst)
             else:
@@ -1188,7 +1188,7 @@ def office_to_pdf(paths: list[Path], progress: Progress, **_) -> list[Path]:
 
 
 # --------------------------------------------------------------------------
-# İşlem kataloğu — menüler buradan üretilir
+# Action catalogue — the menus are generated from this
 # --------------------------------------------------------------------------
 
 @dataclass
@@ -1197,19 +1197,19 @@ class Action:
     label: str
     extensions: list[str]
     func: Callable[..., list[Path]]
-    group: str = ""                     # sağ tık alt menüsü (Windows)
+    group: str = ""                     # right-click submenu (Windows)
     needs_password: str | None = None   # None | "new" | "existing"
-    ask: tuple | None = None            # (kwarg, soru, varsayılan): kullanıcıdan metin iste
-    multi_only: bool = False            # en az 2 dosya ister
-    batch: bool = False                 # tüm dosyalar tek işte (birleştir, görsel→PDF)
-    interactive: bool = False           # kendi penceresini açar (ilerleme penceresi yok)
-    order: str | None = None            # çoklu seçimde sıralama penceresi: başlıktaki açıklama
-    quick: Callable[..., list[Path]] | None = None  # pencereli işlemde sıralama → "Tamam" ile bu çalışır
+    ask: tuple | None = None            # (kwarg, question, default): ask the user for text
+    multi_only: bool = False            # needs at least 2 files
+    batch: bool = False                 # all files in one job (merge, image → PDF)
+    interactive: bool = False           # opens its own window (no progress window)
+    order: str | None = None            # order window for multiple selection: description in the title
+    quick: Callable[..., list[Path]] | None = None  # windowed action with ordering → this runs on "OK"
     kwargs: dict = field(default_factory=dict)
 
 
 def _t(name: str, module: str = "tools"):
-    """Aracı çağrı anında yükler (araç modülleri bu modülü içe aktarır → döngüyü önler)."""
+    """Loads the tool at call time (tool modules import this module → avoids the import cycle)."""
     def call(*args, **kwargs):
         import importlib
         return getattr(importlib.import_module(f"{__package__}.{module}"), name)(*args, **kwargs)
@@ -1223,14 +1223,14 @@ G_CONV, G_EDIT, G_PAGE, G_SIZE, G_SEC = "Dönüştür", "Düzenle", "Sayfalar", 
 G_PRINT = "Yazdır"
 
 ACTIONS: list[Action] = [
-    # --- Sayfa düzenleyici (PDF + görsel + Office karışık; menüde en üstte)
+    # --- Page organizer (PDF + images + Office mixed; top of the menu)
     Action("organize",   "Sayfaları düzenle / birleştir…",   PDF + IMAGES + OFFICE, _t("organize"),
            batch=True, interactive=True, order="Birleştirme sırası (üstteki önce gelir)",
            quick=_t("merge_files")),
-    # --- Klasör
+    # --- Folder
     Action("folder2pdf", "Klasörü tek PDF yap (yer imli)",   [FOLDER], _t("folder_to_pdf")),
     Action("search",     "Klasörde ara (dosyaların içinde)…", [FOLDER], _t("run", "search"), interactive=True),
-    # --- Dönüştür
+    # --- Convert
     Action("pdf2word",   "PDF → Word",                       PDF, pdf_to_word, G_CONV),
     Action("pdf2wordx",  "PDF → Word (birebir düzen)",       PDF, _t("pdf_to_word_exact"), G_CONV),
     Action("pdf2wordf",  "PDF → Word (akan metin)",          PDF, pdf_to_word, G_CONV, kwargs={"mode": "flow"}),
@@ -1242,7 +1242,7 @@ ACTIONS: list[Action] = [
     Action("pdf2md",     "PDF → Markdown",                   PDF, _t("pdf_to_markdown", "docops"), G_CONV),
     Action("pdfa",       "PDF/A'ya çevir (arşiv)",           PDF, _t("pdf_to_pdfa", "docops"), G_CONV),
     Action("ocr",        "Taranmış PDF'i aranabilir yap (OCR)", PDF, _t("make_searchable"), G_CONV),
-    # --- Düzenle
+    # --- Edit
     Action("merge",      "PDF'leri birleştir",               PDF, merge_pdfs, G_EDIT, multi_only=True, batch=True,
            order="Birleştirme sırası (üstteki önce gelir)"),
     Action("pagenum",    "Sayfa numarası ekle",              PDF, _t("add_page_numbers"), G_EDIT),
@@ -1263,13 +1263,13 @@ ACTIONS: list[Action] = [
     Action("a4",         "Bütün sayfaları A4 yap",           PDF, _t("to_a4", "docops"), G_PAGE),
     Action("splitsize",  "Boyuta göre böl… (ör. 10 MB)",     PDF, _t("split_by_size", "docops"), G_PAGE,
            ask=("size", "Her parça en fazla kaç MB olsun? (ör. 10 ya da 9.5)", "10")),
-    # --- Yazdır
+    # --- Print
     Action("nup2",       "2 sayfayı 1 kâğıda",               PDF, _t("n_up", "docops"), G_PRINT, kwargs={"per": 2}),
     Action("nup4",       "4 sayfayı 1 kâğıda",               PDF, _t("n_up", "docops"), G_PRINT, kwargs={"per": 4}),
     Action("nup6",       "6 sayfayı 1 kâğıda",               PDF, _t("n_up", "docops"), G_PRINT, kwargs={"per": 6}),
     Action("booklet",    "Kitapçık yap (katla-zımbala)",     PDF, _t("booklet", "docops"), G_PRINT),
     Action("gray",       "Siyah-beyaz yap",                  PDF, _t("grayscale", "docops"), G_PRINT),
-    # --- Küçült / Onar
+    # --- Shrink / Repair
     Action("compress",   "Sıkıştır (önerilen)",              PDF, compress_pdf, G_SIZE, kwargs={"level": "normal"}),
     Action("compress2",  "Çok sıkıştır (e-posta için)",      PDF, compress_pdf, G_SIZE, kwargs={"level": "strong"}),
     Action("target2",    "2 MB altına indir",                PDF, _t("compress_to_target"), G_SIZE,
@@ -1280,7 +1280,7 @@ ACTIONS: list[Action] = [
            ask=("target", "Hedef boyut (MB; ör. 1.5 ya da 500kb):", "2")),
     Action("fixscan",    "Taramayı düzelt (eğiklik, boş sayfa)", PDF, _t("fix_scan", "docops"), G_SIZE),
     Action("repair",     "Bozuk PDF'i onar",                 PDF, _t("repair_pdf"), G_SIZE),
-    # --- Güvenlik
+    # --- Security
     Action("protect",    "Şifre koy",                        PDF, protect_pdf, G_SEC, needs_password="new"),
     Action("unlock",     "Şifreyi kaldır",                   PDF, unlock_pdf, G_SEC, needs_password="existing"),
     Action("redact",     "Kişisel bilgileri karart…",        PDF, _t("redact", "docops"), G_SEC,
@@ -1289,7 +1289,7 @@ ACTIONS: list[Action] = [
     Action("compare",    "İki PDF'i karşılaştır",            PDF, _t("compare", "docops"), G_EDIT,
            multi_only=True, batch=True,
            order="Hangisi eski? Üstteki eski sürüm, alttaki yeni sürüm sayılır"),
-    # --- Office / görseller
+    # --- Office / images
     Action("office2pdf", "PDF'e çevir",                      OFFICE, office_to_pdf, batch=True),
     Action("wordmerge",  "Word belgelerini birleştir (Word olarak)", ["docx"], _t("merge_word", "officetools"),
            multi_only=True, batch=True, order="Birleştirme sırası (üstteki önce gelir)"),
@@ -1315,7 +1315,7 @@ ACTIONS: list[Action] = [
            kwargs={"angle": 90}),
     Action("imgrotl",    "Sola döndür",                      IMAGES, _t("rotate_images", "imagetools"),
            kwargs={"angle": -90}),
-    # --- her menünün sonunda
+    # --- at the end of every menu
     Action("settings",   "Ayarlar…",                         PDF + IMAGES + OFFICE + [FOLDER],
            _t("run", "settings"), interactive=True, batch=True),
 ]
@@ -1329,7 +1329,7 @@ def actions_for_extension(ext: str) -> list[Action]:
 
 
 def all_extensions() -> list[str]:
-    """Dosya uzantıları (klasör sözde uzantısı hariç)."""
+    """File extensions (excluding the folder pseudo extension)."""
     seen: list[str] = []
     for a in ACTIONS:
         for e in a.extensions:

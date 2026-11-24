@@ -1,4 +1,4 @@
-"""Paralel toplu işlem, büyük PDF → Word'ü parçalama, İptal."""
+"""Parallel batch processing, splitting large PDF → Word, Cancel."""
 
 import re
 import shutil
@@ -35,7 +35,7 @@ def test_word_parallel_matches_serial(tmp_path, monkeypatch):
     par = actions.pdf_to_word([src], msgs.append)[0]
     assert any("2 çekirdekte" in m for m in msgs)
     assert _docx_text(tmp_path / "seri.docx") == _docx_text(par)
-    assert "ÖĞÜŞİ" in _docx_text(par)                      # Türkçe karakter JSON'dan sağlam döndü
+    assert "ÖĞÜŞİ" in _docx_text(par)                      # Turkish characters came back intact from the JSON
 
 
 def test_run_files_parallel(tmp_path, monkeypatch):
@@ -49,9 +49,9 @@ def test_run_files_parallel(tmp_path, monkeypatch):
 
 def test_run_files_falls_back_when_pool_breaks(tmp_path, monkeypatch):
     files = [make_text_pdf(tmp_path / f"b{i}.pdf", pages=1, table=False) for i in range(2)]
-    monkeypatch.setattr(parallel, "_run_one", None)          # alt süreç işi bulamaz → havuz bozulur
+    monkeypatch.setattr(parallel, "_run_one", None)          # the child process can't find the job → the pool breaks
     outs, errs = parallel.run_files("rotate", files, {"angle": 90}, noop)
-    assert len(outs) == 2 or errs                            # ya sırayla tamamlandı ya da hata bildirildi
+    assert len(outs) == 2 or errs                            # either finished sequentially or an error was reported
     assert all(pymupdf.open(o)[0].rotation == 90 for o in outs)
 
 
@@ -61,7 +61,7 @@ def test_cancel_stops_word_conversion(tmp_path):
     parallel.CANCEL.set()
     with pytest.raises(parallel.Cancelled):
         actions.pdf_to_word([src], noop)
-    assert pymupdf.Page.get_text is orig                     # yama geri alındı
+    assert pymupdf.Page.get_text is orig                     # the patch was undone
     assert not list(tmp_path.glob("*.docx"))
 
 
@@ -74,7 +74,7 @@ def test_cancel_kills_external_program():
 
 
 def test_main_job_reports_cancel(tmp_path, monkeypatch):
-    """İptal: ilerleme penceresi 'İptal edildi' der, biten dosyalar kalır."""
+    """Cancel: the progress window says 'Cancelled', finished files stay."""
     from riffle import main as main_mod
     from riffle import ui
     files = [make_text_pdf(tmp_path / f"m{i}.pdf", pages=1, table=False) for i in range(3)]
@@ -86,7 +86,7 @@ def test_main_job_reports_cancel(tmp_path, monkeypatch):
         def progress(m):
             calls["n"] += 1
             if "m1" in m:
-                cancel.set()                                 # ikinci dosyada iptal
+                cancel.set()                                 # cancel on the second file
         seen["result"] = job(progress)
     monkeypatch.setattr(ui, "run_with_window", fake_window)
     from riffle import settings

@@ -1,5 +1,5 @@
-"""Dil desteği: her metnin İngilizcesi var mı, yer tutucular tutuyor mu, unutulmuş Türkçe metin var mı,
-İngilizce arayüz uçtan uca çalışıyor mu."""
+"""Language support: does every string have an English version, do the placeholders match, are there
+forgotten Turkish strings, does the English UI work end to end."""
 
 import ast
 import os
@@ -51,7 +51,7 @@ def _literal_text(node):
 
 
 def test_no_unwrapped_ui_strings():
-    """Pencere yazıları, ilerleme mesajları ve hata metinleri T(...) ile sarılmış olmalı."""
+    """Window text, progress messages and error texts must be wrapped in T(...)."""
     offenders = []
     for f in sorted((ROOT / "riffle").glob("*.py")) + [ROOT / "install.py"]:
         tree = ast.parse(f.read_text(encoding="utf-8"))

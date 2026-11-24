@@ -1,5 +1,5 @@
-# Türkçe kaynak metin → İngilizce. Düzenlerken yer tutucuları ({0}, {1:.0f}) ve 'ℹ ' / '✔' başlarını koru.
-# Eksik çeviriyi bulmak için: python tests/i18n_scan.py
+# Turkish source text → English. When editing, keep the placeholders ({0}, {1:.0f}) and the 'ℹ ' / '✔' prefixes.
+# To find missing translations: python tests/i18n_scan.py
 CATALOG = {
     'Sayfaları düzenle / birleştir…': 'Organize / merge pages…',
     'Birleştirme sırası (üstteki önce gelir)': 'Merge order (top comes first)',

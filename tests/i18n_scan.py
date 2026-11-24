@@ -1,6 +1,6 @@
-"""Kaynak koddaki çevrilecek metinleri toplar (test ve çeviri bakımı için).
+"""Collects the strings to translate in the source code (for tests and translation upkeep).
 
-    python tests/i18n_scan.py            # çevirisi eksik metinleri yazar
+    python tests/i18n_scan.py            # prints strings with missing translations
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ FILES = sorted((ROOT / "riffle").glob("*.py")) + [ROOT / "install.py"]
 
 
 def msgids() -> dict[str, str]:
-    """{metin: 'dosya:satır'}"""
+    """{msgid: 'file:line'}"""
     found: dict[str, str] = {}
 
     def add(s, f, n):
@@ -40,7 +40,7 @@ def msgids() -> dict[str, str]:
                         for el in kw.value.elts[1:]:
                             if isinstance(el, ast.Constant) and el.value:
                                 add(el.value, f, n)
-        if f.name == "actions.py":                      # grup adları ve sayfa aralığı sorusu
+        if f.name == "actions.py":                      # group names and the page range question
             for n in tree.body:
                 if isinstance(n, ast.Assign):
                     tgt = [t.id for t in n.targets if isinstance(t, ast.Name)]
@@ -54,7 +54,7 @@ def msgids() -> dict[str, str]:
                         for v in n.value.elts[1:]:
                             if isinstance(v, ast.Constant) and v.value:
                                 add(v.value, f, n)
-        if f.name == "stamper.py":                      # renk adları
+        if f.name == "stamper.py":                      # colour names
             for n in tree.body:
                 if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "COLORS" for t in n.targets):
                     for k in n.value.keys:
@@ -68,6 +68,6 @@ if __name__ == "__main__":
     from riffle.i18n_en import CATALOG
     ids = msgids()
     missing = [m for m in ids if m not in CATALOG]
-    print(f"{len(ids)} metin, {len(missing)} çevirisiz")
+    print(f"{len(ids)} strings, {len(missing)} untranslated")
     for m in missing:
         print(f"{ids[m]:24} {m!r}")

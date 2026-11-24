@@ -1,5 +1,5 @@
-"""Word / Excel / PowerPoint / CSV araçları: Office dosyasını küçült, Word'leri Word olarak birleştir,
-CSV'yi Excel'e düzgün çevir, sunumdan not çıktısı, Office dosyasındaki resimleri çıkar."""
+"""Word / Excel / PowerPoint / CSV tools: shrink Office files, merge Word files as Word,
+convert CSV to Excel properly, handouts from presentations, extract the images in Office files."""
 
 from __future__ import annotations
 
@@ -24,11 +24,11 @@ def _media(name: str) -> bool:
     return name.startswith(MEDIA_DIRS) and not name.endswith("/")
 
 
-# ============================================================ Office dosyasını küçült
+# ============================================================ shrink Office files
 
 def _shrink_image(data: bytes, ext: str, max_side: int, quality: int) -> tuple[bytes, str]:
-    """(yeni veri, yeni uzantı). Küçülmüyorsa eskisini döndürür. Saydam PNG'ler PNG kalır;
-    saydamlığı olmayan büyük PNG'ler (ekran görüntüsü, fotoğraf) JPEG olur."""
+    """(new data, new extension). Returns the old one if it doesn't get smaller. Transparent PNGs stay PNG;
+    large PNGs without transparency (screenshots, photos) become JPEG."""
     from PIL import Image, ImageOps
     try:
         im = Image.open(io.BytesIO(data))
@@ -52,10 +52,10 @@ def _shrink_image(data: bytes, ext: str, max_side: int, quality: int) -> tuple[b
         jpg = io.BytesIO()
         rgb.save(jpg, "JPEG", quality=quality, optimize=True, progressive=True)
         candidates.append((jpg, ".jpeg" if ext != ".jpg" else ".jpg"))
-        if ext == ".png":                      # çizim/ekran görüntüsü: PNG çoğu zaman daha küçük ve net
+        if ext == ".png":                      # drawing/screenshot: PNG is often smaller and sharper
             png = io.BytesIO()
             (im if im.mode in ("P", "L") else rgb).save(png, "PNG", optimize=True)
-            # JPEG yalnızca belirgin kazançta (yazı kenarları bulanmasın)
+            # JPEG only for a clear gain (so text edges don't blur)
             candidates.append((png, ".png"))
             if len(png.getvalue()) <= 1.6 * len(jpg.getvalue()):
                 candidates = [candidates[1]]
@@ -67,8 +67,8 @@ def _shrink_image(data: bytes, ext: str, max_side: int, quality: int) -> tuple[b
 
 
 def _rewrite_zip(src: Path, dst: Path, renames: dict[str, str], replaced: dict[str, bytes]) -> None:
-    """Medya dosyalarını değiştirip yeniden adlandırarak Office paketini yeniden yaz:
-    ilişki (.rels) hedefleri ve [Content_Types].xml uzantıları güncellenir."""
+    """Rewrite the Office package with changed and renamed media files:
+    relationship (.rels) targets and [Content_Types].xml extensions are updated."""
     base = {old.rsplit("/", 1)[1]: new.rsplit("/", 1)[1] for old, new in renames.items()}
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
         new_exts = {n.rsplit(".", 1)[1].lower() for n in renames.values()}
@@ -86,7 +86,7 @@ def _rewrite_zip(src: Path, dst: Path, renames: dict[str, str], replaced: dict[s
                 data = text.encode("utf-8")
             elif name == "[Content_Types].xml" and new_exts:
                 text = data.decode("utf-8")
-                for o, n in renames.items():           # nadir: medyaya özel Override kaydı
+                for o, n in renames.items():           # rare: an Override entry specific to the media
                     text = text.replace(f'PartName="/{o}"', f'PartName="/{n}"')
                 for e in sorted(new_exts):
                     if f'Extension="{e}"' not in text.replace("'", '"'):
@@ -146,7 +146,7 @@ def compress_office(paths: list[Path], progress: Progress, max_side: int = 1920,
 
 
 def _check_office(path: Path) -> None:
-    """Çıktı gerçekten açılıyor mu (bozuk dosya bırakmayalım)."""
+    """Does the output really open (don't leave a broken file behind)."""
     ext = path.name.replace(".tmp", "").rsplit(".", 1)[-1].lower()
     try:
         if ext == "docx":
@@ -166,7 +166,7 @@ def _check_office(path: Path) -> None:
         raise ConversionError(T("Küçültülmüş dosya doğrulanamadı: {0}", e))
 
 
-# ============================================================ Word belgelerini Word olarak birleştir
+# ============================================================ merge Word documents as Word
 
 def merge_word(paths: list[Path], progress: Progress, ordered: bool = False, **_) -> list[Path]:
     from .actions import sorted_by_name
@@ -187,7 +187,7 @@ def merge_word(paths: list[Path], progress: Progress, ordered: bool = False, **_
             doc = Document(str(p))
         except Exception as e:
             raise ConversionError(T("{0} açılamadı: {1}", p.name, e))
-        master.add_page_break()            # her belge yeni sayfadan başlasın
+        master.add_page_break()            # every document starts on a new page
         comp.append(doc)
     out = unique_path(paths[0].parent, f"{paths[0].stem}_birlesik", ".docx")
     comp.save(str(out))
@@ -209,10 +209,10 @@ def _decode(data: bytes) -> tuple[str, str]:
         return data.decode("utf-8-sig"), "utf-8-sig"
     except UnicodeDecodeError:
         pass
-    # UTF-8 değilse eski Windows kodlaması: Türkçe (1254) ile Batı Avrupa (1252) yalnızca 6 baytta ayrılır
-    # (ğ ı ş İ Ğ Ş ↔ ð ý þ Ý Ð Þ). Almanca/Fransızca/İspanyolca dosyalarda bu baytlar yok: ikisi de doğru.
-    # Bu baytlar varsa: Türkçede olmayan harfler (á é í ó ú ß ñ æ ø …) belirgin sayıdaysa Batı Avrupa
-    # (İzlandaca vb.), değilse Türkçe (Türkçe metinde ı/ş/ğ çok sık, yabancı harf ancak tek tük).
+    # If not UTF-8, an old Windows encoding: Turkish (1254) and Western European (1252) differ in only 6 bytes
+    # (ğ ı ş İ Ğ Ş ↔ ð ý þ Ý Ð Þ). German/French/Spanish files don't have these bytes: both are right.
+    # If these bytes exist: Western European if there is a clear number of letters Turkish doesn't use
+    # (á é í ó ú ß ñ æ ø …) (Icelandic etc.), otherwise Turkish (ı/ş/ğ are very common in Turkish, foreign letters rare).
     tr = data.decode("cp1254", errors="replace")
     west = data.decode("cp1252", errors="replace")
     paired = sum(tr.count(c) for c in "ğĞıİşŞ")
@@ -239,20 +239,20 @@ _ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 
 
 def _column_style(values: list[str]) -> tuple[str, str]:
-    """(sayı biçimi, tarih sırası) — sütundaki kanıta göre.
-    Sayı: 'tr' (1.234,56; Avrupa'nın çoğu) ya da 'en' (1,234.56; ABD/İngiltere).
-    Tarih: 'dmy' (gün önce), 'mdy' (ABD, ay önce) ya da 'text' (karar verilemedi: dönüştürme)."""
+    """(number format, date order) — based on the evidence in the column.
+    Number: 'tr' (1.234,56; most of Europe) or 'en' (1,234.56; US/UK).
+    Date: 'dmy' (day first), 'mdy' (US, month first) or 'text' (undecided: don't convert)."""
     vals = [v.strip() for v in values]
     tr = sum(1 for v in vals if _TR_NUM.match(v) and not _EN_NUM.match(v))
     en = sum(1 for v in vals if _EN_NUM.match(v) and not _TR_NUM.match(v))
     dates = [m for m in (_DATE.match(v) for v in vals) if m]
     order = "dmy"
     if any(int(m[1]) > 12 for m in dates):
-        order = "dmy"                                   # 25/12/2026: ilk sayı gün
+        order = "dmy"                                   # 25/12/2026: the first number is the day
     elif any(int(m[3]) > 12 for m in dates):
-        order = "mdy"                                   # 12/25/2026: ikinci sayı gün (ABD)
+        order = "mdy"                                   # 12/25/2026: the second number is the day (US)
     elif any(m[2] == "/" for m in dates):
-        order = "text"                                  # yalnızca 03/11/2026 gibi: 3 Kasım mı 11 Mart mı belli değil
+        order = "text"                                  # only things like 03/11/2026: 3 November or 11 March is unclear
     return ("tr" if tr >= en else "en"), order
 
 
@@ -262,7 +262,7 @@ def _convert(v: str, style: tuple[str, str]):
         return None
     if _INT.match(s):
         digits = s.lstrip("-")
-        # baştaki sıfır (telefon, posta kodu) ya da 11+ hane (TC kimlik, hesap no): metin kalsın
+        # leading zero (phone, postcode) or 11+ digits (national ID, account number): keep as text
         if (len(digits) > 1 and digits[0] == "0") or len(digits) >= 11:
             return s
         return int(s)
@@ -332,10 +332,10 @@ def csv_to_excel(paths: list[Path], progress: Progress, **_) -> list[Path]:
     return outputs
 
 
-# ============================================================ Sunumdan not çıktısı
+# ============================================================ handouts from presentations
 
 def slide_handout(paths: list[Path], progress: Progress, per_page: int = 3, **_) -> list[Path]:
-    """Sayfa başına 3 slayt (solda), yanlarında not çizgileri (sağda). A4 dikey."""
+    """3 slides per page (left), note lines next to them (right). A4 portrait."""
     import pymupdf
     from .actions import office_to_pdf_many
     outputs = []
@@ -379,7 +379,7 @@ def slide_handout(paths: list[Path], progress: Progress, per_page: int = 3, **_)
     return outputs
 
 
-# ============================================================ Office dosyasındaki resimleri çıkar
+# ============================================================ extract the images in Office files
 
 def extract_office_images(paths: list[Path], progress: Progress, min_bytes: int = 2048, **_) -> list[Path]:
     outputs = []

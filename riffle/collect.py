@@ -1,16 +1,16 @@
-"""Çoklu seçim toplayıcı.
+"""Multi-selection collector.
 
-Windows Gezgini sağ tık menüsünde 5 dosya seçip bir komuta tıklayınca
-programı 5 kez, her seferinde TEK dosyayla çalıştırır. Birleştirme gibi
-işlemler için bunları tek bir işte toplamamız gerekiyor:
+When you select 5 files in the Windows Explorer context menu and click a command,
+Explorer runs the program 5 times, each time with ONE file. For actions like merging
+we have to gather them into a single job:
 
-  1. Her süreç kendi dosya yolunu geçici klasöre bir 'bilet' olarak yazar.
-  2. Kilidi ilk alan süreç 'lider' olur, yeni bilet gelmeyene kadar bekler,
-     hepsini toplar ve işi tek başına yapar.
-  3. Diğerleri biletlerinin lider tarafından alındığını görünce sessizce çıkar.
+  1. Every process writes its own file path to a temp folder as a 'ticket'.
+  2. The first process to take the lock becomes the 'leader', waits until no new tickets
+     arrive, collects them all and does the job alone.
+  3. The others exit quietly once they see the leader has taken their ticket.
 
-Linux'ta (Nemo %F) tüm dosyalar zaten tek seferde gelir; o durumda
-toplayıcı devreye girmez.
+On Linux (Nemo %F) all files arrive at once anyway; the collector is not used
+in that case.
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ import time
 import uuid
 from pathlib import Path
 
-SETTLE = 0.6       # bu kadar süre yeni bilet gelmezse toplama biter (sn)
-MAX_WAIT = 8.0     # lider en fazla bu kadar bekler
-STALE_LOCK = 60.0  # çökmüş liderin kilidi bu kadar sonra geçersiz
+SETTLE = 0.6       # collection ends if no new ticket arrives for this long (s)
+MAX_WAIT = 8.0     # the leader waits at most this long
+STALE_LOCK = 60.0  # a crashed leader's lock becomes invalid after this long
 
 
 def _spool(action_id: str) -> Path:
@@ -52,9 +52,9 @@ def _tickets(spool: Path) -> list[Path]:
 
 
 def collect(action_id: str, paths: list[str]) -> list[str] | None:
-    """Toplanan tüm dosyaları döndürür; bu süreç takipçiyse None döner."""
+    """Returns all collected files; returns None if this process is a follower."""
     if len(paths) != 1:
-        return paths  # zaten toplu geldi (Linux / komut satırı)
+        return paths  # already arrived together (Linux / command line)
 
     spool = _spool(action_id)
     lock = spool / "leader.lock"
@@ -64,11 +64,11 @@ def collect(action_id: str, paths: list[str]) -> list[str] | None:
     deadline = time.time() + MAX_WAIT + 5
     while time.time() < deadline:
         if not ticket.exists():
-            return None  # lider biletimizi aldı
+            return None  # the leader took our ticket
         if _try_lock(lock):
             return _lead(spool, lock)
         time.sleep(0.1)
-    # Bir şeyler ters gitti: en azından kendi dosyamızı işleyelim
+    # Something went wrong: at least process our own file
     ticket.unlink(missing_ok=True)
     return paths
 
@@ -92,5 +92,5 @@ def _lead(spool: Path, lock: Path) -> list[str]:
         except OSError:
             pass
     lock.unlink(missing_ok=True)
-    # aynı dosya iki kez gelirse tekrar etme
+    # don't repeat a file that arrives twice
     return list(dict.fromkeys(result))

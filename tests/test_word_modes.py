@@ -1,4 +1,4 @@
-"""PDF → Word: iki sütun algılama (otomatik birebir düzen), akan metin modu, yatay ayırıcı çizgiler."""
+"""PDF → Word: two-column detection (automatic exact layout), flowing text mode, horizontal separator lines."""
 
 import re
 import zipfile
@@ -51,7 +51,7 @@ def test_two_column_detection(tmp_path):
 
 
 def test_two_column_table_is_not_article(tmp_path):
-    """İki sütunlu tablo (etiket | değer) makale sayılmamalı."""
+    """A two-column table (label | value) must not count as a paper."""
     d = pymupdf.open()
     p = d.new_page()
     y = 80
@@ -73,10 +73,10 @@ def test_auto_uses_exact_layout_for_two_columns(tmp_path):
     src = two_column_pdf(tmp_path / "makale.pdf")
     msgs = []
     auto = pdf_to_word([src], msgs.append)[0]
-    assert "txbxContent" in _xml(auto)                       # birebir düzen: metin kutuları
+    assert "txbxContent" in _xml(auto)                       # exact layout: text boxes
     assert any("iki sütunlu" in m and "akan metin" in m for m in msgs)
     flow = pdf_to_word([src], noop, mode="flow")[0]
-    assert "txbxContent" not in _xml(flow)                   # akan metin
+    assert "txbxContent" not in _xml(flow)                   # flowing text
     one = pdf_to_word([one_column_pdf(tmp_path / "rapor.pdf")], noop)[0]
     assert "txbxContent" not in _xml(one)
 
@@ -91,13 +91,13 @@ def _rules_pdf(path):
     p = d.new_page()
     _text(p, (180, 100), "Masaüstü Dalma Erozyon Tezgâhı", size=16)
     _text(p, (220, 125), "Ekip için kolay anlatım", size=11)
-    p.draw_line((72, 136), (523, 136), color=(0.18, 0.36, 0.54), width=1)          # başlık altı çizgisi
+    p.draw_line((72, 136), (523, 136), color=(0.18, 0.36, 0.54), width=1)          # heading underline
     _text(p, (72, 170), "Bu belge sistemin ne yaptığını ve neden böyle tasarlandığını anlatır.", size=10)
     _text(p, (72, 260), "Altı çizili kısa başlık", size=10)
-    p.draw_line((72, 262), (180, 262), color=(0, 0, 0), width=0.5)                 # kelime altı çizgisi
-    p.draw_line((72, 300), (523, 300), color=(1, 1, 1), width=1)                   # beyaz: görünmez
+    p.draw_line((72, 262), (180, 262), color=(0, 0, 0), width=0.5)                 # word underline
+    p.draw_line((72, 300), (523, 300), color=(1, 1, 1), width=1)                   # white: invisible
     _text(p, (72, 296), "Beyaz çizginin üstündeki satır burada duruyor.", size=10)
-    # tablo: kenarlıkları tablo olarak kalmalı, paragraf kenarlığı olmamalı
+    # table: its borders must stay a table, not paragraph borders
     for i in range(4):
         p.draw_rect(pymupdf.Rect(72, 400 + i * 20, 300, 420 + i * 20), color=(0, 0, 0))
         p.draw_rect(pymupdf.Rect(300, 400 + i * 20, 523, 420 + i * 20), color=(0, 0, 0))
@@ -120,7 +120,7 @@ def test_rule_becomes_paragraph_border(tmp_path):
     assert len(borders) == 1 and 'w:color="2E5C8A"' in borders[0] and "<w:bottom " in borders[0]
     para = re.search(r"<w:p(?: [^>]*)?>(?:(?!</w:p>).)*<w:pBdr>.*?</w:p>", xml, re.S).group(0)
     assert "Ekip için kolay anlatım" in re.sub(r"<[^>]+>", "", para)
-    # şemaya uygun sıra: pBdr, spacing/ind/jc'den önce
+    # schema order: pBdr before spacing/ind/jc
     ppr = re.search(r"<w:pPr>(.*?)</w:pPr>", para, re.S).group(1)
     assert ppr.index("<w:pBdr>") < min([ppr.index(t) for t in ("<w:spacing", "<w:ind", "<w:jc") if t in ppr]
                                        or [len(ppr)])

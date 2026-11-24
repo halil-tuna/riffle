@@ -1,4 +1,4 @@
-"""Sayfa düzenleyici modeli: ekleme, taşıma, döndürme, bölme, geri alma, kaydetme."""
+"""Page organizer model: adding, moving, rotating, splitting, undo, saving."""
 
 from __future__ import annotations
 
@@ -40,11 +40,11 @@ def test_unsupported_reported(work, two):
 
 
 @pytest.mark.parametrize("sel,to,expected,new_idx", [
-    ([4], 0, [4, 0, 1, 2, 3], [0]),          # sondakini başa
-    ([0], 5, [1, 2, 3, 4, 0], [4]),          # baştakini sona
-    ([0, 1], 4, [2, 3, 0, 1, 4], [2, 3]),    # iki sayfayı araya
-    ([1, 3], 0, [1, 3, 0, 2, 4], [0, 1]),    # dağınık seçim başa
-    ([2], 2, [0, 1, 2, 3, 4], [2]),          # yerinde bırak
+    ([4], 0, [4, 0, 1, 2, 3], [0]),          # last one to the start
+    ([0], 5, [1, 2, 3, 4, 0], [4]),          # first one to the end
+    ([0, 1], 4, [2, 3, 0, 1, 4], [2, 3]),    # two pages in between
+    ([1, 3], 0, [1, 3, 0, 2, 4], [0, 1]),    # scattered selection to the start
+    ([2], 2, [0, 1, 2, 3, 4], [2]),          # leave in place
 ])
 def test_move(two, sel, to, expected, new_idx):
     d = Document()
@@ -75,7 +75,7 @@ def test_split_groups_and_delete_clears_marker(two):
     d.add_files(two)
     d.toggle_split(2)
     assert [len(g) for g in d.groups()] == [3, 2]
-    d.toggle_split(4)                 # son sayfadan sonra bölme anlamsız → yok sayılır
+    d.toggle_split(4)                 # a split after the last page makes no sense → ignored
     assert [len(g) for g in d.groups()] == [3, 2]
     d.delete([2])
     assert len(d.groups()) == 1
@@ -96,7 +96,7 @@ def test_sort_and_reverse(work):
 def test_save_single_with_rotation_and_order(work, two):
     d = Document()
     d.add_files(two)
-    d.move([3], 0)                    # b'nin 1. sayfası başa
+    d.move([3], 0)                    # page 1 of b to the start
     d.rotate([0], 270)
     d.add_blank(1)
     folder, stem = d.default_target()
@@ -106,9 +106,9 @@ def test_save_single_with_rotation_and_order(work, two):
     with pymupdf.open(out[0]) as r:
         assert len(r) == 6
         assert r[0].rotation == 270 and "Başlık 1" in first_line(r[0])
-        assert r[1].get_text().strip() == ""          # boş sayfa
+        assert r[1].get_text().strip() == ""          # blank page
         assert "Başlık 1" in first_line(r[2])
-    assert two[0].exists() and two[1].exists()       # kaynaklar değişmedi
+    assert two[0].exists() and two[1].exists()       # sources unchanged
 
 
 def test_save_split_parts(work, two):
@@ -173,4 +173,4 @@ def test_office_file_added_as_pages(work):
     assert d.add_files([f]) == []
     assert d.pages and d.pages[0].label.startswith("not.txt")
     folder, stem = d.default_target()
-    assert folder == work and stem == "not_duzenlenmis"   # geçici klasör değil, asıl dosyanın yanı
+    assert folder == work and stem == "not_duzenlenmis"   # next to the original file, not the temp folder

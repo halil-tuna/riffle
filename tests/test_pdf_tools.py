@@ -1,4 +1,4 @@
-"""PDF araçları: birleştir, böl, sıkıştır, döndür, şifre, sayfa işlemleri, numara, filigran, onar."""
+"""PDF tools: merge, split, compress, rotate, password, page operations, numbers, watermark, repair."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def test_unique_path_never_overwrites(work):
     assert unique_path(work, "a", ".pdf").name == "a (2).pdf"
 
 
-# ----------------------------------------------------------------- temel araçlar
+# ----------------------------------------------------------------- basic tools
 
 def test_merge_natural_order(work):
     files = [make_text_pdf(work / n, pages=1, table=False) for n in ("ek 10.pdf", "ek 2.pdf", "ek 1.pdf")]
@@ -109,7 +109,7 @@ def test_garbage_file_gives_clear_error(garbage):
         compress_pdf([garbage], noop)
 
 
-# ----------------------------------------------------------------- sayfa aralığı
+# ----------------------------------------------------------------- page ranges
 
 @pytest.mark.parametrize("spec,n,expected", [
     ("1-3,5", 6, [0, 1, 2, 4]),
@@ -145,7 +145,7 @@ def test_extract_delete_reverse(pdf):
         assert "Başlık 3" in d[0].get_text()
 
 
-# ----------------------------------------------------------------- numara / filigran
+# ----------------------------------------------------------------- numbers / watermark
 
 def _visual_bbox(page, needle):
     for b in page.get_text("dict")["blocks"]:
@@ -201,9 +201,9 @@ def test_merge_keeps_chosen_order(tmp_path):
     from conftest import make_text_pdf
     from riffle.actions import merge_pdfs
     a, b, c = (make_text_pdf(tmp_path / f"{n}.pdf", pages=1, table=False) for n in ("s1", "s2", "s10"))
-    out = merge_pdfs([c, a, b], lambda m: None)[0]                  # sırasız: doğal ad sırası
+    out = merge_pdfs([c, a, b], lambda m: None)[0]                  # no order given: natural name order
     assert [t[1] for t in pymupdf.open(out).get_toc()] == ["s1", "s2", "s10"]
-    out = merge_pdfs([c, a, b], lambda m: None, ordered=True)[0]    # pencereden gelen sıra korunur
+    out = merge_pdfs([c, a, b], lambda m: None, ordered=True)[0]    # the order from the window is kept
     assert [t[1] for t in pymupdf.open(out).get_toc()] == ["s10", "s1", "s2"]
 
 
@@ -214,7 +214,7 @@ def test_order_actions_registered():
 
 
 def test_cli_order_skipped_without_window(tmp_path, monkeypatch):
-    """Pencere yoksa (ya da RIFFLE_ORDER=name) ad sırası kullanılır, soru sorulmaz."""
+    """Without a window (or with RIFFLE_ORDER=name) name order is used and nothing is asked."""
     from riffle import ui
     monkeypatch.setenv("RIFFLE_ORDER", "name")
     ps = [tmp_path / "b.pdf", tmp_path / "a.pdf"]
@@ -224,7 +224,7 @@ def test_cli_order_skipped_without_window(tmp_path, monkeypatch):
 
 
 def test_merge_files_mixed(tmp_path, images):
-    """PDF + görsel karışık, verilen sırayla tek PDF; her dosya bir yer imi."""
+    """PDF + images mixed, one PDF in the given order; every file a bookmark."""
     from conftest import make_text_pdf
     from riffle.tools import merge_files
     a = make_text_pdf(tmp_path / "rapor.pdf", pages=2, table=False)
@@ -238,7 +238,7 @@ def test_merge_files_mixed(tmp_path, images):
 
 @needs_soffice
 def test_merge_files_with_office_single_libreoffice_call(tmp_path, monkeypatch):
-    """İki Word + bir PDF: Office dosyaları TEK LibreOffice çağrısında çevrilir."""
+    """Two Word files + a PDF: Office files are converted in ONE LibreOffice call."""
     from conftest import make_text_pdf
     from riffle import actions
     from riffle.tools import merge_files
@@ -265,7 +265,7 @@ def test_merge_files_with_office_single_libreoffice_call(tmp_path, monkeypatch):
 
 
 def test_lo_profile_lock(tmp_path, monkeypatch):
-    """Kalıcı LibreOffice profili kilitliyse ikinci işlem geçici profile düşer, kilit bırakılır."""
+    """If the persistent LibreOffice profile is locked, the second run falls back to a temporary profile and releases the lock."""
     from riffle import actions
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
@@ -273,4 +273,4 @@ def test_lo_profile_lock(tmp_path, monkeypatch):
         with actions._LoProfile() as p2:
             assert p1 != p2 and "libreoffice-profil" in p1 and "libreoffice-profil" not in p2
     with actions._LoProfile() as p3:
-        assert p3 == p1                                   # kilit kalkınca kalıcı profil yine kullanılır
+        assert p3 == p1                                   # once the lock is gone the persistent profile is used again

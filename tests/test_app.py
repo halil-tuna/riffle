@@ -1,4 +1,4 @@
-"""Uygulama katmanı: komut satırı, çoklu seçim toplayıcı, kurulum (Windows/Nemo), arayüz."""
+"""Application layer: command line, multi-selection collector, installation (Windows/Nemo), UI."""
 
 from __future__ import annotations
 
@@ -18,13 +18,13 @@ RUN = ROOT / "run.pyw"
 
 
 def run(*args, env=None, timeout=120):
-    e = dict(os.environ, RIFFLE_AUTOCLOSE_MS="500")   # pencere açılırsa kendiliğinden kapansın
+    e = dict(os.environ, RIFFLE_AUTOCLOSE_MS="500")   # if a window opens, it closes by itself
     e.update(env or {})
     return subprocess.run([sys.executable, str(RUN), *map(str, args)], capture_output=True, text=True,
                           timeout=timeout, env=e)
 
 
-# ----------------------------------------------------------------- komut satırı
+# ----------------------------------------------------------------- command line
 
 def test_cli_list():
     r = run("--list")
@@ -45,10 +45,10 @@ def test_cli_unsupported_file_skipped(work, pdf):
 
 
 def test_cli_ask_via_stdin(pdf):
-    # tkinter yokken soru stdin'den sorulur (pencereli ortamda test_ui.py dener)
+    # without tkinter the question is asked on stdin (test_ui.py tries it with a window)
     try:
         import tkinter  # noqa: F401
-        if os.environ.get("DISPLAY") or sys.platform == "win32":   # Windows'ta pencere hep açılır
+        if os.environ.get("DISPLAY") or sys.platform == "win32":   # a window always opens on Windows
             pytest.skip("pencereli ortam: soru penceresi test_ui.py'de denenir")
     except ImportError:
         pass
@@ -61,12 +61,12 @@ def test_cli_ask_via_stdin(pdf):
         assert len(d) == 2
 
 
-# ----------------------------------------------------------------- toplayıcı (Windows çoklu seçim)
+# ----------------------------------------------------------------- collector (Windows multi-selection)
 
 def test_collector_merges_parallel_launches(work):
     files = [make_text_pdf(work / f"parça {i}.pdf", pages=1, table=False) for i in range(1, 8)]
     procs = []
-    for f in files:   # Windows Gezgini gibi: her dosya için ayrı süreç, hafif zaman farkıyla
+    for f in files:   # like Windows Explorer: a separate process per file, with slight timing differences
         procs.append(subprocess.Popen([sys.executable, str(RUN), "merge", str(f)],
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE))
         time.sleep(0.03)
@@ -94,7 +94,7 @@ def test_collector_two_batches_back_to_back(work):
 # ----------------------------------------------------------------- kurulum
 
 class FakeReg:
-    """winreg'in kullandığımız kısmı, bellekte."""
+    """The part of winreg we use, in memory."""
 
     def __init__(self):
         self.keys: dict[str, dict] = {}
@@ -162,19 +162,19 @@ def test_windows_menu_groups(installer):
     from riffle.actions import actions_for_extension
     assert len(cmds) == len(actions_for_extension("pdf"))
     assert all(str(install.RUN) in c and c.endswith('"%1"') for c in cmds)
-    # Office: az işlem → alt grup yok, doğrudan liste
+    # Office: few actions → no subgroups, a direct list
     docx = [k for k in reg.keys if "\\.docx\\" in k and k.endswith("_grup")]
     assert docx == []
     assert any("\\.heic\\" in k for k in reg.keys), "iPhone HEIC menüde olmalı"
-    # klasör menüleri: klasörün üstü (%1) ve içi boş alan (%V)
+    # folder menus: on the folder (%1) and on empty space inside (%V)
     folder_cmds = {k: v["(Default)"] for k, v in reg.keys.items() if "\\Directory\\" in k and k.endswith("\\command")}
     assert any("Background" not in k and v.endswith('"%1"') for k, v in folder_cmds.items())
     assert any("Background" in k and v.endswith('"%V"') for k, v in folder_cmds.items())
 
 
 def test_windows_cascades_fit_16(installer):
-    """Gezgin bir alt menü ağacında 16 satırdan fazlasını göstermiyor (alt menü başlıkları dahil):
-    her üst girdi en fazla 16 satır, her işlem tam bir kez, Ayarlar ana menüde."""
+    """Explorer shows no more than 16 rows in a submenu tree (submenu headings included):
+    every top-level entry at most 16 rows, every action exactly once, Settings in the main menu."""
     install, reg = installer
     from riffle.actions import actions_for_extension
     for ext in ("pdf", "docx", "jpg", "heic", "pptx"):
@@ -186,7 +186,7 @@ def test_windows_cascades_fit_16(installer):
         assert sorted(seen) == sorted(a.id for a in actions_for_extension(ext)), ext
         main = [x.id for _, acts in cascades[0][1] for x in acts]
         assert main[-1] == "settings" and main[0] == "organize"
-    # kayıt defterinde de: her kök altında en çok 16 satır
+    # in the registry too: at most 16 rows under each root
     install.install_windows()
     roots = {k for k in reg.keys if "\\.pdf\\" in k and k.split("\\")[-1].startswith("Riffle")}
     for r in roots:
@@ -212,7 +212,7 @@ def test_windows_menu_has_icon(installer):
 
 
 def test_windows_menu_frozen_exe(installer, monkeypatch):
-    """Kurulum dosyasıyla gelen .exe: komut doğrudan programı çağırır (python/run.pyw yok)."""
+    """The .exe from the installer: the command calls the program directly (no python/run.pyw)."""
     install, reg = installer
     monkeypatch.setattr(install, "FROZEN", True)
     monkeypatch.setattr(install.sys, "executable", r"C:\Users\a\AppData\Local\Programs\Riffle\Riffle.exe")
@@ -260,14 +260,14 @@ def test_nemo_actions(tmp_path, monkeypatch):
 
 
 def test_installer_loads_without_libraries():
-    """install.py kütüphaneler kurulmadan önce çalışır: PyMuPDF yokken de yüklenebilmeli
-    (iki kez yakalanan 'tavuk-yumurta' hatasının testi)."""
+    """install.py runs before the libraries are installed: it must load without PyMuPDF
+    (test for the 'chicken and egg' bug that was caught twice)."""
     code = ("import sys; sys.modules['pymupdf'] = None; sys.modules['fitz'] = None; "
             "sys.modules['pdf2docx'] = None; sys.path.insert(0, r'%s'); "
             "import install; t = install.menu_tree('pdf'); print(len(t))" % ROOT)
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == "8"   # üstte (düzenleyici, imza, form) + 6 alt menü + en sonda Ayarlar
+    assert r.stdout.strip() == "8"   # top (organizer, signature, form) + 6 submenus + Settings at the end
 
 
 # ---------------------------------------------------------------- ayarlar
@@ -287,11 +287,11 @@ def cfg(tmp_path, monkeypatch):
 def test_menu_hidden_and_favorites(cfg):
     settings, install = cfg
     s = settings.load()
-    s["hidden"] = ["pdf2excel", "watermark", "settings"]       # Ayarlar gizlenemez
+    s["hidden"] = ["pdf2excel", "watermark", "settings"]       # Settings can't be hidden
     s["pinned"] = ["compress"]
     settings.save(s)
     settings._write("kullanim.json", {"pdf2word": 9, "merge": 5, "rotate": 2, "pdf2excel": 50})
-    assert settings.favorites() == ["compress", "pdf2word", "merge"]   # gizli ve az kullanılan yok
+    assert settings.favorites() == ["compress", "pdf2word", "merge"]   # no hidden or rarely used actions
     tree = install.menu_tree("pdf")
     top = [a.id for a in tree[0][1]]
     assert top[:3] == ["compress", "pdf2word", "merge"]
@@ -299,7 +299,7 @@ def test_menu_hidden_and_favorites(cfg):
     assert "pdf2excel" not in all_ids and "watermark" not in all_ids
     assert all_ids[-1] == "settings" and all_ids.count("compress") == 1
     conv = next(acts for g, acts in tree if g == "Dönüştür")
-    assert "pdf2word" not in [a.id for a in conv]                 # üste taşındı, grupta tekrar yok
+    assert "pdf2word" not in [a.id for a in conv]                 # moved to the top, not repeated in the group
 
 
 def test_record_use_triggers_refresh(cfg):
@@ -328,7 +328,7 @@ def test_nemo_respects_hidden(cfg, tmp_path, monkeypatch):
     install.install_linux()
     assert not (tmp_path / "nemo" / "riffle_merge.nemo_action").exists()
     comp = (tmp_path / "nemo" / "riffle_compress.nemo_action").read_text(encoding="utf-8")
-    assert "Name=Riffle › Sıkıştır" in comp                         # sık kullanılan: grupsuz
+    assert "Name=Riffle › Sıkıştır" in comp                         # favourites: no group
     st = (tmp_path / "nemo" / "riffle_settings.nemo_action").read_text(encoding="utf-8")
     assert "Extensions=dir;pdf;" in st
 
@@ -347,7 +347,7 @@ def test_output_to_folder_setting(cfg, tmp_path, pdf):
 
 
 def test_installer_script_files_exist():
-    """Inno Setup betiğinin derleme anında okuduğu dosyalar depoda var mı (simge, lisans)."""
+    """Do the files the Inno Setup script reads at build time exist in the repo (icon, license)?"""
     import re
     iss = ROOT / "packaging" / "installer.iss"
     for key in ("SetupIconFile", "LicenseFile"):

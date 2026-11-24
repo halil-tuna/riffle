@@ -1,4 +1,4 @@
-"""Bütün sayfaları A4 yap, boyuta göre böl, Excel → PDF'te genişliğe sığdır."""
+"""Make all pages A4, split by size, fit to width in Excel → PDF."""
 
 import io
 import shutil
@@ -25,8 +25,8 @@ def test_to_a4_mixed_sizes(tmp_path):
         assert len(r) == 4
         sizes = [(round(p.rect.width), round(p.rect.height)) for p in r]
         assert sizes[0] == sizes[1] == sizes[3] == (595, 842)
-        assert sizes[2] == (842, 595)                     # yatay slayt yatay A4
-        assert all(f"Sayfa {i + 1}" in r[i].get_text() for i in range(4))   # metin vektör kalır
+        assert sizes[2] == (842, 595)                     # landscape slide → landscape A4
+        assert all(f"Sayfa {i + 1}" in r[i].get_text() for i in range(4))   # text stays vector
 
 
 def test_to_a4_already_a4(tmp_path):
@@ -63,7 +63,7 @@ def test_split_by_size(tmp_path):
         assert p.stat().st_size <= 1024 * 1024
         with pymupdf.open(p) as r:
             seen += [pg.get_text().strip().split("\n")[0] for pg in r]
-    assert seen == [f"Sayfa {i}" for i in range(1, 11)]      # hiçbir sayfa kaybolmadı, sıra korundu
+    assert seen == [f"Sayfa {i}" for i in range(1, 11)]      # no page was lost, order kept
 
 
 def test_split_by_size_small_file(tmp_path):
@@ -74,13 +74,13 @@ def test_split_by_size_small_file(tmp_path):
     assert docops.split_by_size([src], noop, size="10") == []
 
 
-# ---------------------------------------------------------------- Excel genişliğe sığdır
+# ---------------------------------------------------------------- Excel fit to width
 
 def test_fit_sheet_xml_variants():
     base = ('<worksheet xmlns="x"><dimension ref="A1:P40"/><sheetData/>'
             '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>')
     out = _fit_sheet_xml(base)
-    assert out.index("<sheetPr>") < out.index("<dimension")          # sheetPr ilk çocuk
+    assert out.index("<sheetPr>") < out.index("<dimension")          # sheetPr is the first child
     assert '<pageSetUpPr fitToPage="1"/>' in out
     assert 'fitToWidth="1" fitToHeight="0" orientation="landscape"' in out
     assert out.index("<pageMargins") < out.index("<pageSetup")
@@ -89,7 +89,7 @@ def test_fit_sheet_xml_variants():
     selfclosing = base.replace("<dimension", '<sheetPr codeName="S1"/><dimension')
     assert '<sheetPr codeName="S1"><pageSetUpPr fitToPage="1"/></sheetPr>' in _fit_sheet_xml(selfclosing)
     user_scaled = base.replace("</worksheet>", '<pageSetup scale="70" orientation="portrait"/></worksheet>')
-    assert _fit_sheet_xml(user_scaled) == user_scaled                 # kullanıcının ayarına dokunma
+    assert _fit_sheet_xml(user_scaled) == user_scaled                 # don't touch the user's setting
     with_hf = base.replace('footer="0.3"/>', 'footer="0.3"/><pageSetup orientation="portrait"/><headerFooter/>')
     out = _fit_sheet_xml(with_hf)
     assert 'fitToWidth="1"' in out and 'orientation="portrait"' in out and "landscape" not in out
@@ -107,6 +107,6 @@ def test_excel_wide_sheet_fits_page_width(tmp_path):
     wb.save(p)
     out = office_to_pdf([p], noop)[0]
     with pymupdf.open(out) as r:
-        assert r[0].rect.width > r[0].rect.height                   # yatay
-        assert "R1C14" in r[0].get_text() and "R1C1 " in r[0].get_text()   # bütün sütunlar ilk sayfada
-        assert len(r) > 1                                            # satırlar sayfalara akar
+        assert r[0].rect.width > r[0].rect.height                   # landscape
+        assert "R1C14" in r[0].get_text() and "R1C1 " in r[0].get_text()   # all columns on the first page
+        assert len(r) > 1                                            # rows flow onto pages

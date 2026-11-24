@@ -1,4 +1,4 @@
-"""Karartma, karşılaştırma, kenar kırpma, Markdown, PDF/A, HTML→PDF."""
+"""Redaction, comparison, margin trimming, Markdown, PDF/A, HTML→PDF."""
 
 import shutil
 from pathlib import Path
@@ -59,11 +59,11 @@ def test_redact_removes_text_and_metadata(tmp_path):
     for kept in ("Halil Test", "12345678901", "2026", "Danışman"):
         assert kept in t
     assert not doc.metadata.get("author")
-    # siyah kutu gerçekten çizilmiş
+    # the black box is really drawn
     pix = doc[0].get_pixmap(dpi=40, colorspace=pymupdf.csGRAY)
     assert min(pix.samples) < 30
     assert any("karartıldı" in m for m in msgs)
-    assert src.read_bytes() != out.read_bytes()          # orijinal dokunulmadı
+    assert src.read_bytes() != out.read_bytes()          # the original is untouched
 
 
 def test_redact_nothing_found(tmp_path):
@@ -75,7 +75,7 @@ def test_redact_nothing_found(tmp_path):
 
 
 def test_redact_on_image_pixels(tmp_path):
-    """Metnin altındaki resim pikselleri de karartılmalı (yalnızca üstüne kutu çizmek yetmez)."""
+    """The image pixels under the text must be blacked out too (drawing a box on top is not enough)."""
     d = pymupdf.open()
     p = d.new_page()
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 400, 60), False)
@@ -88,8 +88,8 @@ def test_redact_on_image_pixels(tmp_path):
     img = doc.extract_image(doc[0].get_images()[0][0])
     im = pymupdf.Pixmap(img["image"])
     row = {im.pixel(x, 30) for x in range(40, 90, 4)}
-    assert (200, 230, 255) not in row                                  # metnin altındaki pikseller silindi
-    assert im.pixel(380, 30) == (200, 230, 255)                        # geri kalanı yerinde
+    assert (200, 230, 255) not in row                                  # the pixels under the text were wiped
+    assert im.pixel(380, 30) == (200, 230, 255)                        # the rest is in place
 
 
 def test_redact_action_registered():
@@ -97,7 +97,7 @@ def test_redact_action_registered():
     assert a.ask and a.ask[0] == "words" and a.ask[2].isspace()
 
 
-# ---------------------------------------------------------------- karşılaştırma
+# ---------------------------------------------------------------- comparison
 
 def test_compare_two_versions(tmp_path):
     a = make_text_pdf(tmp_path / "rapor_v1.pdf", pages=2, table=False)
@@ -107,7 +107,7 @@ def test_compare_two_versions(tmp_path):
     _text(d[1], (72, 500), "Yeni eklenen sonuç cümlesi burada.")
     d.save(tmp_path / "rapor_v2.pdf")
     msgs = []
-    out = docops.compare([tmp_path / "rapor_v2.pdf", a], msgs.append)[0]   # sıra ters verilse de v1 eski
+    out = docops.compare([tmp_path / "rapor_v2.pdf", a], msgs.append)[0]   # v1 is the old one even if the order is reversed
     r = pymupdf.open(out)
     assert len(r) == 3
     summary = r[0].get_text()
@@ -138,13 +138,13 @@ def test_compare_different_page_counts(tmp_path):
     assert len(r) == 4
 
 
-# ---------------------------------------------------------------- kırpma
+# ---------------------------------------------------------------- trimming
 
 def test_autocrop(tmp_path):
     d = pymupdf.open()
     p = d.new_page()
     p.draw_rect(pymupdf.Rect(200, 300, 400, 500), fill=(0, 0, 0))
-    d.new_page()                                                    # boş sayfa kalmalı
+    d.new_page()                                                    # the blank page must stay
     d.save(tmp_path / "k.pdf")
     msgs = []
     out = docops.autocrop([tmp_path / "k.pdf"], msgs.append)[0]
@@ -152,7 +152,7 @@ def test_autocrop(tmp_path):
     r = doc[0].rect
     assert 220 <= r.width <= 230 and 220 <= r.height <= 230
     assert doc[1].rect == pymupdf.Rect(0, 0, 595, 842)
-    # içerik hâlâ görünüyor
+    # the content is still visible
     pix = doc[0].get_pixmap(dpi=36, colorspace=pymupdf.csGRAY)
     assert min(pix.samples) < 20
     assert any("1 sayfanın" in m for m in msgs)
@@ -164,7 +164,7 @@ def test_autocrop_rotated(tmp_path, rotated):
     for a, b in zip(src, doc):
         assert b.rotation == a.rotation
         assert b.rect.width <= a.rect.width and b.rect.height <= a.rect.height
-        # görünen metin kaybolmadı
+        # visible text was not lost
         assert a.get_text().split() == b.get_text().split()
 
 
@@ -175,7 +175,7 @@ def test_markdown(tmp_path, pdf):
     md = out.read_text(encoding="utf-8")
     assert out.suffix == ".md"
     assert "ÖĞÜŞ" in md or "öğrenci" in md
-    assert "|" in md                                                  # tablo markdown tablosu olmalı
+    assert "|" in md                                                  # the table must become a markdown table
 
 
 @pytest.mark.skipif(not docops.find_ghostscript(), reason="Ghostscript yok")
@@ -184,7 +184,7 @@ def test_pdfa(tmp_path, pdf):
     doc = pymupdf.open(out)
     assert "OutputIntents" in doc.xref_object(doc.pdf_catalog())
     assert "pdfaid:part" in doc.get_xml_metadata()
-    assert "Başlık 1: Çalışma güçlü şişe ığdır ÖĞÜŞİ" in doc[0].get_text()   # ToUnicode düzeltmesi
+    assert "Başlık 1: Çalışma güçlü şişe ığdır ÖĞÜŞİ" in doc[0].get_text()   # ToUnicode fix
 
 
 def test_pdfa_without_ghostscript(tmp_path, pdf, monkeypatch):
@@ -203,7 +203,7 @@ def test_html_to_pdf(tmp_path):
 
 
 def test_fix_tounicode_ghostscript(tmp_path, pdf):
-    """PyMuPDF'nin taşan bfrange'leri Acrobat/Ghostscript'te 'ı'yı '1' yapıyordu."""
+    """PyMuPDF's overflowing bfranges turned 'ı' into '1' in Acrobat/Ghostscript."""
     import subprocess
     from riffle.actions import fix_tounicode
     gs = docops.find_ghostscript()
@@ -212,13 +212,13 @@ def test_fix_tounicode_ghostscript(tmp_path, pdf):
     doc = pymupdf.open(pdf)
     assert fix_tounicode(doc) >= 1
     doc.save(tmp_path / "f.pdf")
-    assert fix_tounicode(pymupdf.open(tmp_path / "f.pdf")) == 0          # ikinci kez gerek yok
+    assert fix_tounicode(pymupdf.open(tmp_path / "f.pdf")) == 0          # not needed a second time
     subprocess.run([gs, "-q", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
                     f"-sOutputFile={tmp_path / 'g.pdf'}", str(tmp_path / "f.pdf")], check=True)
     assert "ığdır ÖĞÜŞİ" in pymupdf.open(tmp_path / "g.pdf")[0].get_text()
 
 
-# ---------------------------------------------------------------- yazdırma
+# ---------------------------------------------------------------- printing
 
 def _numbered(path, n, w=595, h=842, rot=0):
     d = pymupdf.open()
@@ -238,17 +238,17 @@ def test_n_up_portrait(tmp_path, per, sheets):
     d = pymupdf.open(out)
     assert len(d) == sheets
     words = [w[4] for w in d[0].get_text("words")]
-    assert words[:per] == [f"S{i + 1}" for i in range(per)]          # okuma sırası: soldan sağa, yukarıdan aşağı
+    assert words[:per] == [f"S{i + 1}" for i in range(per)]          # reading order: left to right, top to bottom
     assert all(pg.rect.width in (pytest.approx(595.3, abs=1), pytest.approx(841.9, abs=1)) for pg in d)
 
 
 def test_n_up_slides_layout(tmp_path):
-    """Yatay slaytlar 2'li: dikey A4'te alt alta; 4'lü: 2×2."""
+    """Landscape slides 2-up: stacked on portrait A4; 4-up: 2×2."""
     src = _numbered(tmp_path / "slayt.pdf", 4, w=720, h=540)
     two = pymupdf.open(docops.n_up([src], noop, per=2)[0])
     assert two[0].rect.height > two[0].rect.width
     ys = sorted(w[1] for w in two[0].get_text("words"))
-    assert ys[1] - ys[0] > 200                                          # alt alta
+    assert ys[1] - ys[0] > 200                                          # stacked
     four = pymupdf.open(docops.n_up([src], noop, per=4)[0])
     assert len(four) == 1 and len(four[0].get_text("words")) == 4
 
@@ -262,7 +262,7 @@ def test_booklet(tmp_path):
     out = docops.booklet([_numbered(tmp_path / "k.pdf", 6)], noop)[0]
     d = pymupdf.open(out)
     assert len(d) == 4 and d[0].rect.width > d[0].rect.height
-    assert [w[4] for w in d[0].get_text("words")] == ["S1"]             # ön kapak: arka (boş) | S1
+    assert [w[4] for w in d[0].get_text("words")] == ["S1"]             # front cover: back (blank) | P1
     assert [w[4] for w in d[1].get_text("words")] == ["S2"]
 
 
@@ -276,14 +276,14 @@ def test_grayscale(tmp_path, pdf):
     g = pymupdf.open(out)
     px = g[0].get_pixmap(dpi=30)
     r, gg, b = px.pixel(int(150 * 30 / 72), int(150 * 30 / 72))
-    assert r == gg == b and r < 200                                     # kırmızı → gri
-    assert "Kırmızı başlık" in g[0].get_text()                          # metin seçilebilir kaldı
+    assert r == gg == b and r < 200                                     # red → grey
+    assert "Kırmızı başlık" in g[0].get_text()                          # the text stayed selectable
 
 
 def test_n_up_and_booklet_keep_rotation(tmp_path):
-    """Döndürülmüş sayfa (yatay görünen) kâğıda da görünen hâliyle konur."""
+    """A rotated page (appearing landscape) is placed on the paper as it appears."""
     src = _numbered(tmp_path / "r.pdf", 4, rot=90)
     for out in (docops.n_up([src], noop, per=2)[0], docops.booklet([src], noop)[0]):
         d = pymupdf.open(out)
         dirs = {ln["dir"] for b in d[0].get_text("dict")["blocks"] for ln in b.get("lines", [])}
-        assert dirs == {(0.0, 1.0)}                     # kaynakta görünen yön: aşağı doğru
+        assert dirs == {(0.0, 1.0)}                     # direction as seen in the source: downwards

@@ -1,7 +1,7 @@
-"""İmza / yazı / görsel yerleştirme — pencereden bağımsız model (test edilebilir).
+"""Signature / text / image placement — window-independent model (testable).
 
-Koordinatlar her zaman sayfanın *görünen* (döndürülmüş hâli) koordinatlarında tutulur;
-PDF'e yazarken derotation_matrix ile sayfanın kendi koordinatına çevrilir.
+Coordinates are always kept in the page's *visible* (rotated) coordinates;
+when writing to the PDF they are converted to the page's own coordinates with derotation_matrix.
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ def signature_path() -> Path:
     return config_dir() / "imza.png"
 
 
-# ------------------------------------------------------------------ imza görseli
+# ------------------------------------------------------------------ signature image
 
 def clean_signature(src, ink=(16, 32, 96)) -> bytes:
-    """Fotoğraftaki/taramadaki imzayı arka planı şeffaf, tek renk mürekkep PNG'ye çevirir."""
+    """Turns a signature from a photo/scan into a single-colour ink PNG with a transparent background."""
     from PIL import Image, ImageFilter, ImageOps
     im = Image.open(src) if not isinstance(src, Image.Image) else src
     im = ImageOps.exif_transpose(im)
@@ -43,12 +43,12 @@ def clean_signature(src, ink=(16, 32, 96)) -> bytes:
         im = Image.alpha_composite(bg, im)
     g = im.convert("L")
     g.thumbnail((1600, 1600))
-    # aydınlatma düzeltmesi: büyük bulanıklık = kağıt; oran → mürekkep koyuluğu
+    # lighting correction: large blur = paper; ratio → ink darkness
     paper = g.filter(ImageFilter.GaussianBlur(max(8, min(g.size) // 12)))
     import numpy as np
     a = np.asarray(g, dtype=np.float32)
     p = np.maximum(np.asarray(paper, dtype=np.float32), 1)
-    dark = np.clip(1 - a / p, 0, 1)                    # 0 = kağıt, 1 = koyu mürekkep
+    dark = np.clip(1 - a / p, 0, 1)                    # 0 = paper, 1 = dark ink
     thr = max(0.12, float(np.percentile(dark, 99)) * 0.25)
     alpha = np.clip((dark - thr * 0.5) / max(thr, 1e-3), 0, 1)
     alpha[dark < thr * 0.5] = 0
@@ -67,7 +67,7 @@ def clean_signature(src, ink=(16, 32, 96)) -> bytes:
 
 
 def strokes_to_png(strokes, size=(600, 220), width=5, ink=(16, 32, 96)) -> bytes:
-    """Fareyle çizilen çizgileri ([(x,y),...] listeleri) şeffaf PNG imzaya çevirir."""
+    """Turns strokes drawn with the mouse (lists of [(x,y),...]) into a transparent PNG signature."""
     from PIL import Image, ImageDraw
     scale = 3
     im = Image.new("RGBA", (size[0] * scale, size[1] * scale), ink + (0,))
@@ -96,7 +96,7 @@ def strokes_to_png(strokes, size=(600, 220), width=5, ink=(16, 32, 96)) -> bytes
 
 
 def image_bytes(path: Path) -> bytes:
-    """Logo/görsel dosyasını PNG baytlarına çevirir (HEIC, EXIF yönü, şeffaflık korunur)."""
+    """Turns a logo/image file into PNG bytes (HEIC, EXIF orientation and transparency are kept)."""
     from PIL import Image, ImageOps
     try:
         import pillow_heif
@@ -120,13 +120,13 @@ def png_size(data: bytes) -> tuple[int, int]:
     return Image.open(io.BytesIO(data)).size
 
 
-# ------------------------------------------------------------------ öğeler
+# ------------------------------------------------------------------ items
 
 @dataclass
 class Stamp:
     kind: str                         # "image" | "text"
     page: int
-    rect: tuple                       # görünen koordinat (x0, y0, x1, y1), pt
+    rect: tuple                       # visible coordinates (x0, y0, x1, y1), pt
     data: bytes = b""                 # PNG (image)
     text: str = ""
     color: tuple = (0.05, 0.1, 0.4)
@@ -155,7 +155,7 @@ _ids = _counter()
 
 
 def text_rect(text: str, at: tuple, fontsize: float = 14) -> tuple:
-    """Metni tam saracak kutu (görünen koordinat)."""
+    """Box that wraps the text exactly (visible coordinates)."""
     from .ocr import _font
     font, _ = _font()
     lines = text.split("\n") or [""]
@@ -170,7 +170,7 @@ def today_text(fmt: str = "%d.%m.%Y") -> str:
 
 
 def place_image(data: bytes, page_rect, at: tuple | None = None, width: float = 160) -> tuple:
-    """Görseli en-boy oranını koruyarak yerleştirir; sayfadan taşmaz."""
+    """Places the image keeping its aspect ratio; it doesn't overflow the page."""
     w, h = png_size(data)
     width = min(width, page_rect.width * 0.8)
     height = width * h / max(w, 1)
@@ -219,9 +219,9 @@ def apply(src: Path, stamps: list[Stamp], out: Path | None = None, flatten_note:
                 kw = dict(fontsize=fs, color=s.color, rotate=page.rotation, align=pymupdf.TEXT_ALIGN_LEFT,
                           fill_opacity=s.opacity, lineheight=1.25)
                 kw.update(dict(fontname="riffleimza", fontfile=ff) if ff else dict(fontname="helv"))
-                # yazı tipi ölçü farkına pay (kesilmesin); pay görünen koordinatta sağa/alta verilir
+                # allowance for font metric differences (no clipping); added to the right/bottom in visible coordinates
                 rc = page.insert_textbox(unrot(vis + (-2, -2, fs * 2, fs)), s.text, **kw)
-                if rc < 0:                              # yine de sığmadıysa küçült
+                if rc < 0:                              # shrink if it still doesn't fit
                     kw["fontsize"] = fs * 0.8
                     page.insert_textbox(unrot(vis + (-2, -2, fs * 6, fs * 3)), s.text, **kw)
         fix_tounicode(doc)

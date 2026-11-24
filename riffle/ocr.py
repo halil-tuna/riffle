@@ -1,13 +1,13 @@
-"""Tesseract ile Türkçe OCR.
+"""Turkish OCR with Tesseract.
 
-İki kullanım:
-  1) make_searchable(): taranmış sayfaların üstüne GÖRÜNMEZ metin katmanı ekler.
-     Görüntü aynen kalır; metin seçilebilir, kopyalanabilir, aranabilir olur.
-  2) text_page(): taranmış sayfayı, OCR metni orijinal konumlarında GÖRÜNÜR olarak
-     yazılmış yeni bir sayfaya çevirir. PDF → Word bunu düzenlenebilir metne çevirir.
+Two uses:
+  1) make_searchable(): adds an INVISIBLE text layer on top of scanned pages.
+     The image stays as it is; the text becomes selectable, copyable and searchable.
+  2) text_page(): turns a scanned page into a new page with the OCR text written VISIBLY
+     at its original positions. PDF → Word turns this into editable text.
 
-Tesseract ayrı bir programdır (Apache-2.0):
-  Windows: https://github.com/UB-Mannheim/tesseract/wiki  (kurarken "Turkish" dilini seç)
+Tesseract is a separate program (Apache-2.0):
+  Windows: https://github.com/UB-Mannheim/tesseract/wiki  (select the "Turkish" language when installing)
   Linux:   sudo apt install tesseract-ocr tesseract-ocr-tur
 """
 
@@ -28,7 +28,7 @@ try:
 except ImportError:  # pragma: no cover
     try:
         import fitz as pymupdf  # type: ignore
-    except ImportError:          # install.py kütüphaneler kurulmadan da yükleyebilsin
+    except ImportError:          # so install.py can load it before the libraries are installed
         pymupdf = None  # type: ignore
 
 OCR_DPI = 300
@@ -72,12 +72,12 @@ def require() -> tuple[str, str]:
     return exe, languages(exe)
 
 
-# ------------------------------------------------------------------ OCR çekirdeği
+# ------------------------------------------------------------------ OCR core
 
 @dataclass
 class Word:
     text: str
-    rect: "pymupdf.Rect"   # PDF koordinatları (pt)
+    rect: "pymupdf.Rect"   # PDF coordinates (pt)
     conf: float
     line_key: tuple
 
@@ -108,7 +108,7 @@ def _tesseract(exe: str, langs: str, img, page) -> list[Word]:
 
 
 def _quality(words: list[Word]) -> float:
-    """Sonuç puanı: güvenilir (≥60) kelimelerin güven toplamı. Daha çok doğru kelime = daha yüksek."""
+    """Result score: sum of the confidence of reliable (≥60) words. More correct words = higher."""
     return sum(w.conf for w in words if w.conf >= 60 and len(w.text) > 1)
 
 
@@ -118,9 +118,9 @@ def _mean_conf(words: list[Word]) -> float:
 
 
 def clean_background(img, strong: bool = False):
-    """Gölge/ışık farkını ve kağıt rengini temizler: arka plan tahmini (büyük maksimum + bulanıklık)
-    ile bölüp kontrastı açar; gürültü için önce medyan. Telefon fotoğrafı ve soluk fotokopide işe yarar.
-    strong: karlı/gürültülü soluk taramalar için daha güçlü yumuşatma."""
+    """Removes shadows/uneven light and paper colour: divides by a background estimate (large maximum + blur)
+    and stretches the contrast; median first for noise. Helps with phone photos and faint photocopies.
+    strong: stronger smoothing for grainy/noisy faint scans."""
     import numpy as np
     from PIL import ImageFilter
     im = img.filter(ImageFilter.GaussianBlur(1)).filter(ImageFilter.MedianFilter(5)) if strong \
@@ -135,7 +135,7 @@ def clean_background(img, strong: bool = False):
 
 
 def binarize(img):
-    """Temizlenmiş görüntüyü Otsu eşiğiyle siyah-beyaz yapar (çok soluk taramalar için)."""
+    """Turns the cleaned image black and white with an Otsu threshold (for very faint scans)."""
     import numpy as np
     from PIL import Image
     n = np.asarray(clean_background(img, strong=True))
@@ -152,14 +152,14 @@ GOOD_CONF = 88
 
 
 def _needs_cleaning(img) -> bool:
-    """Gölge/eşit olmayan ışık ya da düşük kontrast var mı? (Tesseract gölgedeki satırları güvenle
-    'yok' sayıyor: ortalama güven yüksek kalırken kelimeler eksik çıkıyor, o yüzden ayrıca bakılır.)"""
+    """Is there a shadow/uneven light or low contrast? (Tesseract confidently 'ignores' lines in shadow:
+    the average confidence stays high while words go missing, so this is checked separately.)"""
     import numpy as np
     from PIL import ImageFilter
     small = img.resize((max(1, img.width // 4), max(1, img.height // 4)))
     bg = np.asarray(small.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(8)), dtype=np.float32)
-    # kontrast küçültülmüş görüntüde değil seyreltilmiş tam görüntüde: ince yazı tipleri (Arial)
-    # küçültmede griye ortalanıp temiz sayfayı 'soluk' gösteriyordu
+    # on the strided full image, not the downscaled one: thin fonts (Arial)
+    # were averaged to grey when downscaling and made a clean page look 'faint'
     a = np.asarray(img, dtype=np.float32)[::3, ::3]
     uneven = np.percentile(bg, 95) - np.percentile(bg, 5)
     contrast = np.percentile(a, 99) - np.percentile(a, 1)
@@ -167,8 +167,8 @@ def _needs_cleaning(img) -> bool:
 
 
 def _ocr_words(exe: str, langs: str, page) -> list[Word]:
-    """Önce ham görüntü; sonuç zayıfsa (gölgeli, soluk, telefonla çekilmiş) temizlenmiş görüntüler de
-    denenir ve en iyi sonuç alınır. Temiz taramalarda ek maliyet yok."""
+    """Raw image first; if the result is weak (shadowed, faint, taken with a phone) the cleaned images are
+    tried too and the best result is used. No extra cost on clean scans."""
     from PIL import Image
     pix = page.get_pixmap(dpi=OCR_DPI, colorspace=pymupdf.csGRAY, alpha=False, annots=False)
     img = Image.frombytes("L", (pix.width, pix.height), pix.samples)
@@ -193,8 +193,8 @@ def ocr_pages(doc, pages: list[int], progress=lambda m: None) -> dict[int, list[
     exe, langs = require()
     out: dict[int, list[Word]] = {}
 
-    # MuPDF belgeleri iş parçacıkları arasında paylaşılamaz → sayfaları önce resme çevirip
-    # sırayla OCR'lamak yerine her iş parçacığına ayrı belge kopyası veriyoruz.
+    # MuPDF documents can't be shared between threads → instead of rendering the pages first and
+    # OCR-ing them one by one, we give each thread its own copy of the document.
     data = doc.tobytes()
 
     def job_isolated(i):
@@ -212,18 +212,18 @@ def ocr_pages(doc, pages: list[int], progress=lambda m: None) -> dict[int, list[
 
 
 def needs_ocr(page) -> bool:
-    """Sayfada çıkarılabilir metin yok ama görsel içerik var mı?"""
+    """Does the page have no extractable text but visual content?"""
     if len(page.get_text().strip()) >= 10:
         return False
     return bool(page.get_images()) or bool(page.get_drawings())
 
 
-# ------------------------------------------------------------------ yazı tipi
+# ------------------------------------------------------------------ font
 
-# Programla gelen Liberation Sans önce: Arial ile birebir aynı genişlikte (taramadan kurulan metin
-# orijinal satır genişliğine oturur) ve her bilgisayarda aynı sonuç. Windows'un Arial'ı ikinci sırada
-# değil son çarelerden: Arial'da boşluk ile bölünmez boşluk (U+00A0), tire ile yumuşak tire (U+00AD)
-# aynı harf şekli; PDF'e gömülünce metin kopyalanınca/aranınca 'Başlık 1' yerine 'Başlık\xa01' çıkıyordu.
+# The bundled Liberation Sans first: exactly the same widths as Arial (text rebuilt from a scan
+# fits the original line width) and the same result on every computer. Windows' Arial comes
+# only as a last resort: in Arial space and non-breaking space (U+00A0), hyphen and soft hyphen (U+00AD)
+# share a glyph; once embedded in the PDF, copying/searching gave 'Başlık\xa01' instead of 'Başlık 1'.
 _BUNDLED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 _FONT_CANDIDATES = [
     (os.path.join(_BUNDLED, "LiberationSans-Regular.ttf"), os.path.join(_BUNDLED, "LiberationSans-Bold.ttf")),
@@ -249,17 +249,17 @@ def _font(bold: bool = False):
     return (pymupdf.Font(fontfile=f), f) if f else (pymupdf.Font("hebo" if bold else "helv"), None)
 
 
-# ------------------------------------------------------------------ 1) aranabilir PDF
+# ------------------------------------------------------------------ 1) searchable PDF
 
 HANDWRITING_MIN_CONF = 80
 
 
 def make_searchable(doc, words_by_page: dict[int, list[Word]], report: dict | None = None) -> int:
-    """Görünmez metin katmanı ekler. Eklenen kelime sayısını döndürür.
+    """Adds an invisible text layer. Returns the number of words added.
 
-    El yazısı gibi görünen sayfalarda (is_text_page değil) Tesseract çoğunlukla anlamsız kelimeler
-    üretir; aramada yanlış sonuç ve kopyalamada çöp metin olmasın diye orada yalnızca çok güvenilir
-    kelimeler eklenir. report verilirse {"handwritten": sayfa sayısı, "dropped": atılan kelime} doldurulur.
+    On pages that look handwritten (not is_text_page) Tesseract mostly produces meaningless words;
+    to avoid wrong search hits and garbage when copying, only very reliable words are added there.
+    If report is given, {"handwritten": page count, "dropped": dropped words} is filled in.
     """
     font, ffile = _font()
     n = 0
@@ -278,27 +278,27 @@ def make_searchable(doc, words_by_page: dict[int, list[Word]], report: dict | No
             length = font.text_length(w.text, fontsize=1)
             if length <= 0:
                 continue
-            size = max(1.0, w.rect.width / length)  # kelime genişliğine sığdır → seçim doğru hizalanır
+            size = max(1.0, w.rect.width / length)  # fit to the word width → the selection lines up correctly
             try:
                 tw.append((w.rect.x0, w.rect.y1 - 0.18 * w.rect.height), w.text, font=font, fontsize=size)
                 n += 1
             except Exception:
                 pass
-        tw.write_text(page, render_mode=3)  # 3 = görünmez
+        tw.write_text(page, render_mode=3)  # 3 = invisible
     from .actions import fix_tounicode
-    fix_tounicode(doc)                      # Acrobat'ta arama/kopyalamada 'ı' → '1' olmasın
+    fix_tounicode(doc)                      # so 'ı' doesn't become '1' when searching/copying in Acrobat
     if report is not None:
         report.update(handwritten=hand, dropped=dropped)
     return n
 
 
-# ------------------------------------------------------------------ 2) metin sayfası
+# ------------------------------------------------------------------ 2) text page
 
 _JUNK = set("|¦_—–-=~·•.,'`\"")
 
 
 def _clean(words: list[Word]) -> list[Word]:
-    """Tablo kenarlığı artıkları ('|', '_' vb.) ve çok düşük güvenli tek karakterleri at."""
+    """Drop table border leftovers ('|', '_' etc.) and single characters with very low confidence."""
     out = []
     for w in words:
         t = w.text.strip("|¦")
@@ -313,8 +313,8 @@ def _clean(words: list[Word]) -> list[Word]:
 
 
 def _lines(words: list[Word], vrules=()) -> list[tuple[str, "pymupdf.Rect"]]:
-    """OCR satırlarını, aradaki büyük boşluklardan ve dikey tablo çizgilerinden
-    (hücre sınırları) parçalara böler."""
+    """Splits OCR lines into pieces at large gaps and at vertical table lines
+    (cell boundaries)."""
     groups: dict[tuple, list[Word]] = {}
     for w in _clean(words):
         groups.setdefault(w.line_key, []).append(w)
@@ -327,7 +327,7 @@ def _lines(words: list[Word], vrules=()) -> list[tuple[str, "pymupdf.Rect"]]:
             cy = (w.rect.y0 + w.rect.y1) / 2
             crosses = any(prev.rect.x1 - 1 <= x <= w.rect.x0 + 1 and y0 - 2 <= cy <= y1 + 2
                           for x, y0, y1 in vrules)
-            if w.rect.x0 - prev.rect.x1 > 1.6 * h or crosses:   # sütun boşluğu / hücre sınırı
+            if w.rect.x0 - prev.rect.x1 > 1.6 * h or crosses:   # column gap / cell boundary
                 segs.append(cur)
                 cur = [w]
             else:
@@ -344,14 +344,14 @@ def _lines(words: list[Word], vrules=()) -> list[tuple[str, "pymupdf.Rect"]]:
 
 
 def is_text_page(words: list[Word]) -> bool:
-    """Basılı metin ağırlıklı ve güvenilir mi? Değilse sayfa resim olarak kalmalı.
+    """Mostly printed text and reliable? Otherwise the page should stay an image.
 
-    Ölçümle belirlendi (bench): basılı taramada iyi kelime oranı 0.85-0.96, ortalama
-    güven 94-96; el yazısında oran 0.24-0.41, güven 38-55. Arada kalan → resim (güvenli).
+    Determined by measurement (bench): on printed scans the good-word ratio is 0.85-0.96, mean
+    confidence 94-96; on handwriting the ratio is 0.24-0.41, confidence 38-55. In between → image (safe).
     """
     if len(words) < 20:
         return False
-    multi = [w for w in words if len(w.text) > 1]        # tek karakterli simgeler ('—', '1') sayılmaz
+    multi = [w for w in words if len(w.text) > 1]        # single-character symbols ('—', '1') don't count
     if len(multi) < 15:
         return False
     ratio = sum(1 for w in multi if w.conf >= 50) / len(multi)
@@ -363,9 +363,9 @@ RULE_DPI = 100
 
 
 def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
-    """Taranmış sayfadaki uzun yatay/dikey çizgileri (tablo kenarlıkları) bulur.
+    """Finds long horizontal/vertical lines (table borders) on a scanned page.
 
-    Döndürür: [(x0, y0, x1, y1), ...] PDF koordinatlarında. numpy yoksa boş liste.
+    Returns: [(x0, y0, x1, y1), ...] in PDF coordinates. Empty list without numpy.
     """
     try:
         import numpy as np
@@ -376,7 +376,7 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
     dark = a < 170
     scale = 72.0 / RULE_DPI
     ox, oy = page.rect.x0, page.rect.y0
-    # Kelime kutularının içini sil: yoğun metin satırları çizgi sanılmasın
+    # Blank out the word boxes: dense text lines should not be taken for rules
     for w in words or []:
         x0 = int((w.rect.x0 - ox) / scale) + 1
         x1 = int((w.rect.x1 - ox) / scale) - 1
@@ -384,21 +384,21 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
         y1 = int((w.rect.y1 - oy) / scale) - 1
         if x1 > x0 and y1 > y0:
             dark[max(y0, 0):y1, max(x0, 0):x1] = False
-    # eğik/soluk taramalara tolerans: çizgiye dik yönde ±2 px genişlet
+    # tolerance for skewed/faint scans: widen by ±2 px across the line
     def widen(m, axis):
         out = m.copy()
         for k in (1, 2):
             out |= np.roll(m, k, axis=axis) | np.roll(m, -k, axis=axis)
         return out
-    dark_h = widen(dark, 0).astype(np.int32)   # yatay çizgiler için dikeyde genişlet
-    dark_v = widen(dark, 1).astype(np.int32)   # dikey çizgiler için yatayda genişlet
+    dark_h = widen(dark, 0).astype(np.int32)   # widen vertically for horizontal lines
+    dark_v = widen(dark, 1).astype(np.int32)   # widen horizontally for vertical lines
     rules = []
 
     def runs(mask_2d, L, horizontal):
-        # her satırda (yatayda) L piksel boyunca kesintisiz koyu olan konumlar
+        # positions that are continuously dark for L pixels along each row (horizontally)
         m = mask_2d if horizontal else mask_2d.T
         c = np.cumsum(np.pad(m, ((0, 0), (1, 0))), axis=1)
-        full = (c[:, L:] - c[:, :-L]) >= 0.8 * L      # pencerenin %80'i koyu: kesik çizgiye tolerans
+        full = (c[:, L:] - c[:, :-L]) >= 0.8 * L      # 80% of the window dark: tolerates dashed lines
         rows = np.where(full.any(axis=1))[0]
         if not len(rows):
             return []
@@ -408,7 +408,7 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
                 band = full[start:prev + 1]
                 xs = np.where(band.any(axis=0))[0]
                 pos = (start + prev) / 2.0
-                if prev - start <= 12:                # kalın blok değil, ince (genişletilmiş) çizgi
+                if prev - start <= 12:                # a thin (widened) line, not a thick block
                     out.append((pos, xs.min(), xs.max() + L))
                 if r is not None:
                     start = r
@@ -424,7 +424,7 @@ def detect_rules(page, words: list[Word] | None = None) -> list[tuple]:
 
 
 def _merge_rules(rules, tol=4.0):
-    """Eğik taramada tek çizginin parça parça algılanmasını birleştirir."""
+    """Joins a single line detected in pieces on a skewed scan."""
     hs = sorted([r for r in rules if r[1] == r[3]], key=lambda r: r[1])
     vs = sorted([r for r in rules if r[0] == r[2]], key=lambda r: r[0])
     out = []
@@ -445,8 +445,8 @@ def _merge_rules(rules, tol=4.0):
 
 
 def _ink_ratio(gray, rect, scale, text, font, size) -> float:
-    """Taramadaki mürekkep / aynı metnin normal kalınlıkta çizilmiş mürekkebi. Kalın yazıda belirgin
-    büyük. (Kutu yoğunluğu tek başına yanıltıyor: alt uzantısız '2026' kutusu sıkı, oran yüksek çıkıyor.)"""
+    """Ink on the scan / ink of the same text drawn at normal weight. Clearly larger for bold text.
+    (Box density alone is misleading: the box of '2026', which has no descenders, is tight and scores high.)"""
     x0, y0 = max(int(rect.x0 / scale), 0), max(int(rect.y0 / scale), 0)
     x1, y1 = int(rect.x1 / scale) + 1, int(rect.y1 / scale) + 1
     box = gray[y0:y1, x0:x1]
@@ -469,10 +469,10 @@ def _ink_ratio(gray, rect, scale, text, font, size) -> float:
 
 
 def text_page(out_doc, src_page, words: list[Word]) -> None:
-    """OCR metnini orijinal konumlarında görünür yazan yeni bir sayfa ekler.
+    """Adds a new page that writes the OCR text visibly at its original positions.
 
-    Punto: satır genişliğinden (Arial ölçülü yazı tipiyle) ve yüksekliğinden birlikte bulunur.
-    Kalın: taramadaki mürekkep yoğunluğu sayfanın olağan yazısından belirgin fazlaysa."""
+    Font size: found from both the line width (with an Arial-metric font) and its height.
+    Bold: if the ink density on the scan is clearly above the page's usual text."""
     font, ffile = _font()
     bold_font, _ = _font(bold=True)
     page = out_doc.new_page(width=src_page.rect.width, height=src_page.rect.height)
@@ -494,12 +494,12 @@ def text_page(out_doc, src_page, words: list[Word]) -> None:
     for text, r in lines:
         length1 = font.text_length(text, fontsize=1)
         h_size = (r.height if r.height > 1.3 * body_h else body_h) / 0.95
-        # Genişlik (Arial ölçülü yazı tipiyle) puntoyu yükseklikten çok daha tutarlı veriyor: OCR kutusunun
-        # yüksekliği harfe göre oynuyor ('2026' alt uzantısız, 'İ' noktalı). Kısa parçalarda yükseklik.
+        # The width (with an Arial-metric font) gives the size much more consistently than the height: the height
+        # of the OCR box varies with the letters ('2026' has no descenders, 'İ' has a dot). Height for short pieces.
         size = r.width / length1 if len(text) >= 4 and length1 > 0 else h_size
         size = max(5.0, min(size, 40.0))
         sized.append([text, r, size, _ink_ratio(gray, r, scale, text, font, size) if gray is not None else 0.0])
-    # sayfanın gövde puntosu: ona yakın (±%15) satırlar aynı puntoya oturur, tablo/metin tek tip görünür
+    # body font size of the page: lines close to it (±15%) snap to it, tables/text look uniform
     body = sorted(sz for t, _, sz, _ in sized if len(t) >= 8)
     if body:
         b = body[len(body) // 2]
@@ -512,13 +512,13 @@ def text_page(out_doc, src_page, words: list[Word]) -> None:
         bold = base > 0 and len(text) >= 3 and ratio > 1.3 * base
         f = bold_font if bold else font
         length = f.text_length(text, fontsize=size)
-        if length > r.width * 1.08 and length > 0:      # taşmasın
+        if length > r.width * 1.08 and length > 0:      # don't overflow
             size *= r.width * 1.08 / length
         try:
             tw.append((r.x0, r.y1 - 0.2 * r.height), text, font=f, fontsize=size)
         except Exception:
             pass
     tw.write_text(page, color=(0, 0, 0))
-    # tablo kenarlıkları: pdf2docx bu çizgilerden gerçek Word tablosu kurar
+    # table borders: pdf2docx builds a real Word table from these lines
     for x0, y0, x1, y1 in rules:
         page.draw_line((x0, y0), (x1, y1), color=(0, 0, 0), width=0.6)

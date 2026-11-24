@@ -1,7 +1,7 @@
-"""Klasörde ara: PDF, Word, PowerPoint, Excel ve metin dosyalarının İÇİNDE kelime arar.
+"""Search in folder: searches for words INSIDE PDF, Word, PowerPoint, Excel and text files.
 
-Türkçe büyük/küçük harf ve şapka/nokta farkı gözetmez: "ogrenci" yazınca "ÖĞRENCİ" de bulunur.
-Taranmış (metni olmayan) PDF'ler ayrıca sayılır: önce "aranabilir yap (OCR)" gerekir.
+Ignores Turkish case and circumflex/dot differences: typing "ogrenci" also finds "ÖĞRENCİ".
+Scanned PDFs (without text) are counted separately: they need "make searchable (OCR)" first.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from .i18n import T
 EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".md", ".csv"}
 MAX_FILES = 5000
 
-# her karakter tek karaktere: konumlar korunur, bağlam orijinal metinden kesilir
+# every character maps to one character: positions are kept, context is cut from the original text
 _FOLD = str.maketrans({"İ": "i", "I": "i", "ı": "i", "Ç": "c", "ç": "c", "Ğ": "g", "ğ": "g", "Ö": "o", "ö": "o",
                        "Ş": "s", "ş": "s", "Ü": "u", "ü": "u", "Â": "a", "â": "a", "Î": "i", "î": "i",
                        "Û": "u", "û": "u", "\n": " ", "\t": " ", "­": "-"})
@@ -38,7 +38,7 @@ class Hit:
 
 
 def _texts(path: Path):
-    """(konum, metin) parçaları. Metni çıkarılamayan dosyada boş döner."""
+    """(position, text) pieces. Empty for a file whose text can't be extracted."""
     ext = path.suffix.lower()
     if ext == ".pdf":
         from .actions import pymupdf
@@ -95,7 +95,7 @@ def files_in(folder: Path) -> list[Path]:
 
 
 def search(folder: Path, query: str, progress=lambda m: None, stop=lambda: False, limit_per_file: int = 50):
-    """(sonuçlar, taranmış_pdf_sayısı, okunamayan dosyalar)"""
+    """(results, number of scanned PDFs, unreadable files)"""
     q = fold(query.strip())
     if not q:
         return [], 0, []

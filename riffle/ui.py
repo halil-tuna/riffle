@@ -1,7 +1,7 @@
-"""Küçük ilerleme penceresi ve şifre sorma.
+"""Small progress window and password prompt.
 
-tkinter yoksa (ör. Mint'te python3-tk kurulmamışsa) sistem bildirimi
-ve konsola düşer, program yine çalışır.
+Without tkinter (e.g. python3-tk not installed on Mint) it falls back to system
+notifications and the console; the program still works.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ except ImportError:
 
 
 def _gui() -> bool:
-    """Pencere açılabilir mi? Linux'ta ekran yoksa (SSH, sunucu) konsola düş."""
+    """Can a window be opened? On Linux without a display (SSH, server) fall back to the console."""
     if not HAS_TK:
         return False
     if sys.platform.startswith("linux"):
@@ -51,7 +51,7 @@ def open_folder(path: Path) -> None:
 
 
 def notify(title: str, body: str) -> None:
-    """tkinter olmadan bildirim."""
+    """Notification without tkinter."""
     print(f"{title}: {body}")
     if sys.platform.startswith("linux"):
         try:
@@ -61,8 +61,8 @@ def notify(title: str, body: str) -> None:
 
 
 def _dialog(question: str, default: str = "", secret: bool = False, parent=None) -> str | None:
-    """Temalı tek satırlık soru penceresi. Tamam: metin · İptal/Esc: None.
-    parent verilirse açık bir pencerenin üstünde (Toplevel) açılır."""
+    """Themed single-line question window. OK: text · Cancel/Esc: None.
+    If parent is given it opens on top of an open window (Toplevel)."""
     from . import theme
     root = tk.Toplevel(parent) if parent is not None else tk.Tk()
     root.title(APP_NAME)
@@ -122,7 +122,7 @@ def ask_password(confirm: bool) -> str | None:
 
 
 def ask_folder() -> str | None:
-    """Çıktı klasörü sor (ayar: her seferinde sor)."""
+    """Ask for the output folder (setting: ask every time)."""
     if not _gui() or os.environ.get("RIFFLE_ORDER") == "name":
         return None
     from tkinter import filedialog
@@ -142,12 +142,12 @@ def ask_text(question: str, default: str = "") -> str | None:
             return default or None
     ans = _dialog(question, default)
     if ans is None:
-        return None                       # İptal
-    return ans if ans.strip() or default.isspace() else None   # boş cevap: yalnızca isteğe bağlı sorularda geçerli
+        return None                       # Cancel
+    return ans if ans.strip() or default.isspace() else None   # empty answer: valid only for optional questions
 
 
 def _describe(p: Path) -> str:
-    """Listede dosyanın yanında görünen kısa bilgi: sayfa sayısı / boyut."""
+    """Short info shown next to the file in the list: page count / size."""
     from .actions import human_size
     info = human_size(p.stat().st_size) if p.exists() else ""
     if p.suffix.lower() == ".pdf":
@@ -161,17 +161,17 @@ def _describe(p: Path) -> str:
 
 
 def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = None, allow_pages: bool = True):
-    """Dosya sırasını seçtiren küçük pencere (sayfa açmaz, anında gelir).
+    """Small window to choose the file order (doesn't open pages, appears instantly).
 
-    Döndürür: ("ok", sıralı liste) · ("organize", sıralı liste) = sayfa düzenleyicide aç · İptal: None
+    Returns: ("ok", ordered list) · ("organize", ordered list) = open in the page organizer · Cancel: None
 
-    Sürükle-bırak · ↑/↓ düğmeleri · Ctrl+↑/↓ taşı · Del çıkar · A→Z / Z→A / tarihe göre · Enter tamam.
+    Drag and drop · ↑/↓ buttons · Ctrl+↑/↓ move · Del remove · A→Z / Z→A / by date · Enter OK.
     """
-    preset = os.environ.get("RIFFLE_ORDER")          # otomatik testler: "name" = Tamam, "organize" = düzenleyici
+    preset = os.environ.get("RIFFLE_ORDER")          # automated tests: "name" = OK, "organize" = organizer
     if preset == "organize":
         return ("organize", list(paths))
     if not _gui() or preset == "name":
-        return ("ok", list(paths))       # pencere yok: ad sırası
+        return ("ok", list(paths))       # no window: name order
     items = list(paths)
     ok_text = ok_text or T("Tamam")
     result: dict = {"value": None}
@@ -252,7 +252,7 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = No
         result["value"] = value
         root.destroy()
 
-    # sürükle-bırak
+    # drag and drop
     drag = {"i": None}
 
     def press(e):
@@ -298,7 +298,7 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = No
     def key(seq, fn):
         root.bind(seq, lambda e: (fn(), "break")[1])
 
-    # listenin kendi bağı: Treeview sınıfının ↑/↓ seçimi (Ctrl'li hâli de) önce çalışıp seçimi kaydırmasın
+    # the list's own binding: the Treeview class's ↑/↓ selection (with Ctrl too) must not run first and move the selection
     for seq, fn in (("<Control-Up>", lambda: move(-1)), ("<Control-Down>", lambda: move(1)),
                     ("<Delete>", remove)):
         tree.bind(seq, lambda e, fn=fn: (fn(), "break")[1])
@@ -318,12 +318,12 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = No
 
 def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[list[Path], list[str]]],
                     cancel: threading.Event | None = None) -> None:
-    """job(progress) -> (çıktılar, hatalar). Pencerede ilerleme gösterir; cancel verilirse İptal düğmesi."""
+    """job(progress) -> (outputs, errors). Shows progress in a window; with cancel, a Cancel button."""
     clip_prefix = "\x00clip:"
     if not _gui():
         def cli_progress(m):
             if m.startswith(clip_prefix):
-                print(m[len(clip_prefix):])         # panonun yerine: metni ekrana yaz
+                print(m[len(clip_prefix):])         # instead of the clipboard: print the text
             else:
                 print("·", m)
         outputs, errors = job(cli_progress)
@@ -334,9 +334,9 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
         return
 
     q: queue.Queue = queue.Queue()
-    clip: dict = {"text": None}          # görseldeki yazı vb.: iş bitince panoya
-    newer: dict = {"v": None}            # GitHub'da daha yeni sürüm (arka planda denetlenir)
-    notes: list[str] = []  # "ℹ " ile başlayan mesajlar sonuç ekranında da kalır
+    clip: dict = {"text": None}          # text from an image etc.: to the clipboard when the job is done
+    newer: dict = {"v": None}            # newer version on GitHub (checked in the background)
+    notes: list[str] = []  # messages starting with "ℹ " also stay on the result screen
     from . import theme
     root = tk.Tk()
     root.title(APP_NAME)
@@ -384,7 +384,7 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
 
     def on_close():
         if running["on"] and cancel is not None:
-            do_cancel()                    # çalışırken pencereyi kapatmak = iptal
+            do_cancel()                    # closing the window while running = cancel
         else:
             root.destroy()
     root.protocol("WM_DELETE_WINDOW", on_close)
@@ -393,12 +393,12 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
     def worker():
         try:
             result = job(lambda m: q.put(("msg", m)))
-        except Exception as e:  # beklenmeyen hata
+        except Exception as e:  # unexpected error
             result = ([], [T("Beklenmeyen hata: {0}", e)])
         q.put(("done", result))
 
     def finish(outputs: list[Path], errors: list[str]):
-        # konsola da yaz (komut satırından çalıştırma ve kayıt için)
+        # also write to the console (for command-line runs and logging)
         if outputs:
             print(T("Tamamlandı:"), ", ".join(p.name for p in outputs))
         for e in errors:
@@ -454,8 +454,8 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
             ttk.Button(buttons, text=T("Kapat"), command=root.destroy, width=10).pack(side="right")
         root.attributes("-topmost", False)
         if outputs and not errors:
-            root.after(15000, root.destroy)  # başarıdaysa 15 sn sonra kendiliğinden kapan
-        auto = os.environ.get("RIFFLE_AUTOCLOSE_MS")      # testler için
+            root.after(15000, root.destroy)  # close by itself after 15 s on success
+        auto = os.environ.get("RIFFLE_AUTOCLOSE_MS")      # for tests
         if auto:
             root.after(int(auto), root.destroy)
 

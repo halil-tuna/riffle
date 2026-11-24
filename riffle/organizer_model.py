@@ -1,13 +1,13 @@
-"""Sayfa düzenleyici: arayüzden bağımsız model.
+"""Page organizer: UI-independent model.
 
-Belge = sıralı sayfa listesi. Her sayfa bir kaynağa işaret eder:
-  - PDF dosyasının bir sayfası
-  - bir görsel (JPG/PNG/HEIC…) → tek sayfa
-  - boş sayfa
-Office dosyaları eklenirken önce PDF'e çevrilir.
+Document = ordered list of pages. Each page points to a source:
+  - a page of a PDF file
+  - an image (JPG/PNG/HEIC…) → one page
+  - a blank page
+Office files are converted to PDF first when added.
 
-İşlemler: ekle, taşı, döndür, sil, çoğalt, böl işareti, sırala, ters çevir, geri al.
-Kaydet: tek PDF ya da böl işaretlerinden ayrılmış birden çok PDF.
+Operations: add, move, rotate, delete, duplicate, split mark, sort, reverse, undo.
+Save: one PDF or several PDFs separated at the split marks.
 """
 
 from __future__ import annotations
@@ -23,31 +23,31 @@ from .actions import IMAGES, OFFICE, PDF, ConversionError, open_pdf, pymupdf, un
 from .i18n import T
 
 A4 = (595.0, 842.0)
-IMAGE_MARGIN = 28.0  # pt (~1 cm): A4'e yerleştirilen görselin kenar boşluğu
+IMAGE_MARGIN = 28.0  # pt (~1 cm): margin of an image placed on A4
 
 
 @dataclass
 class PageRef:
     kind: str                 # "pdf" | "image" | "blank"
     path: Path | None = None
-    index: int = 0            # PDF sayfa numarası (0 tabanlı)
-    rotation: int = 0         # kullanıcının eklediği döndürme (0/90/180/270)
-    size: tuple = A4          # döndürmesiz görünen boyut (pt)
-    label: str = ""           # arayüzde gösterilecek kısa ad
-    uid: int = 0              # benzersiz kimlik (küçük resim önbelleği)
-    origin: Path | None = None  # kullanıcının seçtiği asıl dosya (Office → geçici PDF olsa da)
+    index: int = 0            # PDF page number (0-based)
+    rotation: int = 0         # rotation added by the user (0/90/180/270)
+    size: tuple = A4          # visible size without rotation (pt)
+    label: str = ""           # short name shown in the UI
+    uid: int = 0              # unique id (thumbnail cache)
+    origin: Path | None = None  # the original file the user chose (even if Office → temporary PDF)
 
 
 @dataclass
 class Document:
     pages: list[PageRef] = field(default_factory=list)
-    split_after: set[int] = field(default_factory=set)   # bu uid'li sayfadan SONRA böl
-    image_mode: str = "a4"    # "a4" | "original": görsel sayfa boyutu
+    split_after: set[int] = field(default_factory=set)   # split AFTER the page with this uid
+    image_mode: str = "a4"    # "a4" | "original": page size for images
     _undo: list = field(default_factory=list, repr=False)
     _next_uid: int = field(default=1, repr=False)
     _tmp: tempfile.TemporaryDirectory | None = field(default=None, repr=False)
 
-    # ------------------------------------------------------------ geri al
+    # ------------------------------------------------------------ undo
 
     def _snapshot(self):
         self._undo.append((copy.deepcopy(self.pages), set(self.split_after)))
@@ -67,7 +67,7 @@ class Document:
     # ------------------------------------------------------------ ekleme
 
     def add_files(self, paths, at: int | None = None, progress=lambda m: None) -> list[str]:
-        """Dosyaları ekler. Eklenemeyenler için hata mesajlarını döndürür."""
+        """Adds the files. Returns error messages for those that could not be added."""
         self._snapshot()
         new: list[PageRef] = []
         errors = []
@@ -76,7 +76,7 @@ class Document:
         converted: dict = {}
         batch_failed = False
         if office:
-            # hepsi tek LibreOffice çağrısında: dosya başına programı açmak en yavaş kısımdı
+            # all in one LibreOffice call: opening the program per file was the slowest part
             from .actions import office_to_pdf_many
             if self._tmp is None:
                 self._tmp = tempfile.TemporaryDirectory(prefix="riffle_duzen_")
@@ -115,14 +115,14 @@ class Document:
         with open_pdf(p) as d:
             out = []
             for i, pg in enumerate(d):
-                r = pg.rect  # görünen (dosyanın kendi döndürmesi dahil) boyut
+                r = pg.rect  # visible size (including the file's own rotation)
                 out.append(PageRef("pdf", p, i, 0, (r.width, r.height),
                                    f"{label or p.name} · {i + 1}", self._uid(), origin or p))
             return out
 
     def _image_page(self, p: Path) -> PageRef:
         from .tools import _open_image
-        im = _open_image(p)          # HEIC dahil; telefon EXIF yönü düzeltilir
+        im = _open_image(p)          # including HEIC; phone EXIF orientation is corrected
         w, h = im.size
         return PageRef("image", p, 0, 0, (w * 0.75, h * 0.75), p.name, self._uid(), p)
 
@@ -135,11 +135,11 @@ class Document:
         pos = len(self.pages) if at is None else at
         self.pages.insert(pos, PageRef("blank", None, 0, 0, size, T("Boş sayfa"), self._uid()))
 
-    # ------------------------------------------------------------ düzenleme
+    # ------------------------------------------------------------ editing
 
     def move(self, indices: list[int], to: int) -> list[int]:
-        """Seçili sayfaları 'to' konumuna (taşımadan önceki dizine göre) taşır.
-        Yeni dizinlerini döndürür."""
+        """Moves the selected pages to position 'to' (index before the move).
+        Returns their new indexes."""
         indices = sorted(set(i for i in indices if 0 <= i < len(self.pages)))
         if not indices:
             return []
@@ -200,10 +200,10 @@ class Document:
         self._snapshot()
         self.pages.reverse()
 
-    # ------------------------------------------------------------ çizim
+    # ------------------------------------------------------------ drawing
 
     def thumbnail_png(self, page: PageRef, max_side: int = 150) -> bytes:
-        """Döndürülmüş hâliyle küçük resim (PNG)."""
+        """Thumbnail as rotated (PNG)."""
         if page.kind == "blank":
             w, h = page.size
             if page.rotation in (90, 270):
@@ -257,11 +257,11 @@ class Document:
             im.save(b, "JPEG", quality=92)
             iw, ih = im.size
             if self.image_mode == "a4":
-                W, H = A4 if ih >= iw else (A4[1], A4[0])     # görsele göre dikey/yatay A4
+                W, H = A4 if ih >= iw else (A4[1], A4[0])     # portrait/landscape A4 according to the image
                 page = out_doc.new_page(width=W, height=H)
                 box = pymupdf.Rect(IMAGE_MARGIN, IMAGE_MARGIN, W - IMAGE_MARGIN, H - IMAGE_MARGIN)
             else:
-                W, H = iw * 0.75, ih * 0.75                     # 96 dpi kabulü
+                W, H = iw * 0.75, ih * 0.75                     # assume 96 dpi
                 page = out_doc.new_page(width=W, height=H)
                 box = page.rect
             page.insert_image(box, stream=b.getvalue(), keep_proportion=True)
@@ -283,7 +283,7 @@ class Document:
                 for k, p in enumerate(g):
                     progress(T("Kaydediliyor: {0}/{1} · sayfa {2}/{3}", gi + 1, len(groups), k + 1, len(g)))
                     self._append(out_doc, p, cache)
-                    # her dosyanın ardışık sayfa grubu bir yer imi (boş sayfa önceki gruba dahil)
+                    # each file's consecutive page group is one bookmark (a blank page joins the previous group)
                     if p.origin is not None and p.origin != prev:
                         toc.append([1, p.origin.stem, len(out_doc)])
                         prev = p.origin

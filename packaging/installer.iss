@@ -1,9 +1,9 @@
-﻿; Riffle — Windows kurulum betiği (Inno Setup 6)
-; Derleme:  iscc /DAppVersion=1.0.0 packaging\installer.iss   (önce python packaging\build_exe.py)
-; Yönetici yetkisi istemez: %LOCALAPPDATA%\Programs\Riffle altına kurar, menü HKCU'ya yazılır.
+﻿; Riffle — Windows installer script (Inno Setup 6)
+; Build:  iscc /DAppVersion=1.0.1 packaging\installer.iss   (first python packaging\build_exe.py)
+; No admin rights needed: installs under %LOCALAPPDATA%\Programs\Riffle, the menu is written to HKCU.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.0.1"
 #endif
 
 [Setup]
@@ -29,8 +29,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 ShowLanguageDialog=no
 
-; Kurulum dili Windows dilinden seçilir (Türkçe değilse İngilizce). Uygulamanın kendi dili de
-; sistemden gelir; Ayarlar'dan değiştirilebilir.
+; The installer language follows the Windows language (English unless Turkish). The app's own language
+; also comes from the system and can be changed in Settings.
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"

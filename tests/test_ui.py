@@ -1,7 +1,7 @@
-"""Gerçek pencereler: sanal ekranda (Xvfb) açılır, xdotool ile klavyeden yazılır.
+"""Real windows: opened on a virtual display (Xvfb), typed into with xdotool.
 
-Çalıştırma (Linux):  xvfb-run -a python -m pytest tests/test_ui.py
-tkinter / DISPLAY / xdotool yoksa atlanır.
+Run (Linux):  xvfb-run -a python -m pytest tests/test_ui.py
+Skipped without tkinter / DISPLAY / xdotool.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def test_progress_window_runs_and_closes(pdf):
 def test_page_range_dialog(pdf):
     p = start("extract", pdf)
     time.sleep(1.0)
-    # alanı temizle (varsayılan boş) ve yaz
+    # clear the field (empty by default) and type
     assert type_into_window("Riffle", "1,3"), "sayfa aralığı penceresi açılmadı"
     assert p.wait(timeout=60) == 0, p.stderr.read()
     out = next(pdf.parent.glob("*_secilen_sayfalar.pdf"))
@@ -77,14 +77,14 @@ def test_password_dialogs_confirm(pdf):
 def test_watermark_dialog_default_text(pdf):
     p = start("watermark", pdf)
     time.sleep(1.0)
-    assert type_into_window("Riffle", "")      # varsayılan 'TASLAK' kabul
+    assert type_into_window("Riffle", "")      # accept the default 'TASLAK'
     assert p.wait(timeout=60) == 0, p.stderr.read()
     out = next(pdf.parent.glob("*_filigranli.pdf"))
     with pymupdf.open(out) as d:
         assert "TASLAK" in d[0].get_text()
 
 
-# ----------------------------------------------------------------- sayfa düzenleyici
+# ----------------------------------------------------------------- page organizer
 
 def _window(name_part, timeout=20):
     deadline = time.time() + timeout
@@ -102,12 +102,12 @@ def _xdo(*args):
 
 
 def _cell_center(win, index, cols):
-    """Düzenleyicideki küçük resmin pencereye göre merkezi (organizer.py ölçüleriyle)."""
+    """Centre of a thumbnail in the organizer relative to the window (with organizer.py's dimensions)."""
     from riffle.organizer import CELL_H, CELL_W, PAD
     geo = subprocess.run(["xdotool", "getwindowgeometry", win], capture_output=True, text=True).stdout
     x0 = PAD + (index % cols) * (CELL_W + PAD) + CELL_W // 2
     y0 = PAD + (index // cols) * (CELL_H + PAD) + CELL_H // 2
-    return x0, y0 + 46   # 46 ≈ araç çubuğu yüksekliği
+    return x0, y0 + 46   # 46 ≈ toolbar height
 
 
 def test_organizer_drag_rotate_split_save(work):
@@ -115,15 +115,15 @@ def test_organizer_drag_rotate_split_save(work):
     a = make_text_pdf(work / "a.pdf", pages=3, table=False)
     b = make_text_pdf(work / "b.pdf", pages=2, table=False)
     env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="25000")
-    env = dict(env, RIFFLE_ORDER="organize")     # çoklu seçim: sıra penceresini atla, düzenleyici
+    env = dict(env, RIFFLE_ORDER="organize")     # multiple selection: skip the order window, organizer
     p = subprocess.Popen([sys.executable, str(RUN), "organize", str(a), str(b)], env=env,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     win = _window("Sayfa d")
     assert win, "düzenleyici penceresi açılmadı"
-    time.sleep(2.5)                                   # küçük resimler
+    time.sleep(2.5)                                   # thumbnails
     _xdo("windowfocus", "--sync", win)
     cols = 6
-    # 5. sayfayı (b·2) en başa sürükle
+    # drag page 5 (b·2) to the very start
     x, y = _cell_center(win, 4, cols)
     tx, ty = _cell_center(win, 0, cols)
     _xdo("mousemove", "--window", win, x, y)
@@ -131,7 +131,7 @@ def test_organizer_drag_rotate_split_save(work):
     for k in range(1, 9):
         _xdo("mousemove", "--window", win, x + (tx - 70 - x) * k // 8, y)
     _xdo("mouseup", "1")
-    # ilk sayfayı sağa döndür, 3. sayfadan sonra böl, kaydet
+    # rotate the first page right, split after page 3, save
     _xdo("mousemove", "--window", win, tx, ty)
     _xdo("click", "1")
     _xdo("key", "ctrl+r")
@@ -167,10 +167,10 @@ def test_organizer_keyboard_delete_undo(work):
     x, y = _cell_center(win, 0, 6)
     _xdo("mousemove", "--window", win, x, y)
     _xdo("click", "1")
-    _xdo("key", "Delete")                 # 1. sayfa silindi
+    _xdo("key", "Delete")                 # page 1 deleted
     _xdo("key", "ctrl+a")
-    _xdo("key", "Delete")                 # hepsi silindi
-    _xdo("key", "ctrl+z")                 # geri al → 3 sayfa
+    _xdo("key", "Delete")                 # all deleted
+    _xdo("key", "ctrl+z")                 # undo → 3 pages
     _xdo("key", "ctrl+s")
     deadline = time.time() + 15
     out = None
@@ -183,10 +183,10 @@ def test_organizer_keyboard_delete_undo(work):
         assert len(d) == 3 and "Başlık 2" in d[0].get_text()
 
 
-# ----------------------------------------------------------------- imza / yazı penceresi
+# ----------------------------------------------------------------- signature / text window
 
 def test_stamper_signature_all_pages_date(work, tmp_path):
-    """Kayıtlı imza Ctrl+I ile eklenir, Ctrl+G ile tüm sayfalara kopyalanır, Ctrl+D tarih, Ctrl+S kaydet."""
+    """The saved signature is added with Ctrl+I, copied to all pages with Ctrl+G, Ctrl+D date, Ctrl+S save."""
     import io
     from datetime import date
     from PIL import Image
@@ -200,14 +200,14 @@ def test_stamper_signature_all_pages_date(work, tmp_path):
     env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="20000", XDG_CONFIG_HOME=str(cfg))
     p = subprocess.Popen([sys.executable, str(RUN), "sign", str(a)], env=env,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    win = _window("mza / yaz")                 # xdotool ASCII dışı aramada eşleşmiyor
+    win = _window("mza / yaz")                 # xdotool doesn't match non-ASCII searches
     assert win, "imza penceresi açılmadı"
     time.sleep(3)
     _xdo("windowfocus", "--sync", win)
-    _xdo("key", "ctrl+i")           # imza (seçili olur)
-    _xdo("key", "ctrl+g")           # tüm sayfalara
-    _xdo("key", "ctrl+d")           # tarih (yalnızca 1. sayfa)
-    _xdo("key", "Up")               # tarihi biraz kaydır
+    _xdo("key", "ctrl+i")           # signature (becomes selected)
+    _xdo("key", "ctrl+g")           # to all pages
+    _xdo("key", "ctrl+d")           # date (page 1 only)
+    _xdo("key", "Up")               # move the date a little
     _xdo("key", "ctrl+s")
     deadline = time.time() + 15
     out = None
@@ -220,13 +220,13 @@ def test_stamper_signature_all_pages_date(work, tmp_path):
         assert [len(pg.get_images()) for pg in d] == [1, 1, 1]
         today = date.today().strftime("%d.%m.%Y")
         assert today in d[0].get_text() and today not in d[1].get_text()
-        # imza sağ altta
+        # signature at the bottom right
         r = d[0].get_image_rects(d[0].get_images()[0][0])[0]
         assert r.x0 > d[0].rect.width / 2 and r.y0 > d[0].rect.height / 2
 
 
 def test_organizer_preview_rotate(work):
-    """Çift tık → büyük önizleme; R ile döndür, → ile sonraki sayfa, Esc kapat, Ctrl+S kaydet."""
+    """Double-click → large preview; R rotates, → next page, Esc closes, Ctrl+S saves."""
     from conftest import make_text_pdf
     a = make_text_pdf(work / "onizle.pdf", pages=3, table=False)
     env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="20000")
@@ -243,8 +243,8 @@ def test_organizer_preview_rotate(work):
     assert pv, "önizleme açılmadı"
     time.sleep(0.8)
     _xdo("windowfocus", "--sync", pv)
-    _xdo("key", "Right")                  # 2. sayfa
-    _xdo("key", "r")                      # sağa döndür
+    _xdo("key", "Right")                  # page 2
+    _xdo("key", "r")                      # rotate right
     _xdo("key", "Escape")
     time.sleep(0.4)
     _xdo("windowfocus", "--sync", win)
@@ -260,7 +260,7 @@ def test_organizer_preview_rotate(work):
         assert [pg.rotation for pg in d] == [0, 90, 0]
 
 
-# ----------------------------------------------------------------- birleştirme sırası penceresi
+# ----------------------------------------------------------------- merge order window
 
 def _order_env():
     env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="20000")
@@ -269,7 +269,7 @@ def _order_env():
 
 
 def test_merge_order_dialog(work):
-    """3 PDF seçilip birleştir: sıra penceresi açılır, Ctrl+↓ ile ilk dosya sona taşınır, Enter."""
+    """Merge with 3 PDFs selected: the order window opens, Ctrl+↓ moves the first file to the end, Enter."""
     from conftest import make_text_pdf
     files = [make_text_pdf(work / f"{n}.pdf", pages=1, table=False) for n in ("a_giris", "b_yontem", "c_sonuc")]
     p = subprocess.Popen([sys.executable, str(RUN), "merge", *map(str, files)], env=_order_env(),
@@ -291,7 +291,7 @@ def test_merge_order_dialog(work):
     assert out is not None
     with pymupdf.open(out) as d:
         assert [t[1] for t in d.get_toc()] == ["b_yontem", "c_sonuc", "a_giris"]
-    assert out.name.startswith("b_yontem")          # çıktı adı da yeni ilk dosyadan
+    assert out.name.startswith("b_yontem")          # the output name comes from the new first file too
 
 
 def test_merge_order_cancel(work):
@@ -309,8 +309,8 @@ def test_merge_order_cancel(work):
 
 
 def test_organize_multi_opens_quick_order_then_merges(work):
-    """Çoklu seçimde 'Sayfaları düzenle / birleştir': önce küçük sıra penceresi (sayfa açılmaz),
-    Enter ile doğrudan birleştirir; sayfa düzenleyici hiç açılmaz."""
+    """'Organize / merge pages' with multiple selection: the small order window first (no pages opened),
+    Enter merges directly; the page organizer never opens."""
     from conftest import make_text_pdf
     a = make_text_pdf(work / "bolum1.pdf", pages=2, table=False)
     b = make_text_pdf(work / "bolum2.pdf", pages=1, table=False)
@@ -322,7 +322,7 @@ def test_organize_multi_opens_quick_order_then_merges(work):
     time.sleep(1.2)
     assert not subprocess.run(["xdotool", "search", "--name", "Sayfa d"], capture_output=True, text=True).stdout
     _xdo("windowfocus", "--sync", win)
-    _xdo("key", "ctrl+Down")                     # bolum1'i sona al
+    _xdo("key", "ctrl+Down")                     # move bolum1 to the end
     _xdo("key", "Return")
     deadline = time.time() + 20
     out = None
@@ -364,7 +364,7 @@ def test_form_window(work):
     assert win
     time.sleep(1.5)
     _xdo("windowfocus", "--sync", win)
-    _xdo("type", "--delay", "30", "Halil Tuna")       # ilk alan odakta
+    _xdo("type", "--delay", "30", "Halil Tuna")       # the first field has focus
     _xdo("key", "ctrl+s")
     deadline = time.time() + 15
     out = None
@@ -398,7 +398,7 @@ def test_settings_window_saves(tmp_path):
 
 
 def test_progress_cancel_button(work):
-    """Uzun PDF → Word sırasında Esc (İptal): yarım dosya kalmaz, pencere 'İptal edildi' der."""
+    """Esc (Cancel) during a long PDF → Word: no half-written file, the window says 'Cancelled'."""
     from conftest import make_text_pdf
     src = make_text_pdf(work / "kalin kitap.pdf", pages=250, table=True)
     env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="3000")

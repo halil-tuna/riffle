@@ -1,4 +1,4 @@
-"""OCR ön işleme: gölgeli / soluk / telefonla çekilmiş taramalarda kelime kaybı olmamalı."""
+"""OCR preprocessing: no words may be lost on shadowed / faint / phone-photographed scans."""
 
 import collections
 import io
@@ -56,7 +56,7 @@ _GT = {}
 
 
 def _acc(words):
-    if "t" not in _GT:                                   # sayfaya gerçekten sığan metin
+    if "t" not in _GT:                                   # text that really fits on the page
         d = pymupdf.open()
         p = d.new_page()
         p.insert_textbox(pymupdf.Rect(60, 60, 535, 800), TXT, fontsize=10.5, fontname="f",

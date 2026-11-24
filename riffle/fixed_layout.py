@@ -1,15 +1,15 @@
-"""Birebir düzen (sabit yerleşim) PDF → Word.
+"""Exact layout (fixed positions) PDF → Word.
 
-Slayt gibi tasarım ağırlıklı sayfalarda akan metin (pdf2docx) taşıyor ve
-dağılıyor. Bu modda her PDF sayfası bir Word sayfası olur:
+On design-heavy pages like slides, flowing text (pdf2docx) overflows and
+falls apart. In this mode every PDF page becomes one Word page:
 
-  - Arka plan: sayfanın YAZISIZ hâli resim olarak, metnin arkasında.
-  - Yazılar: orijinal konumunda, düzenlenebilir metin kutuları
-    (font boyutu, kalın/italik, renk korunur).
+  - Background: the page WITHOUT text as an image, behind the text.
+  - Text: editable text boxes at the original positions
+    (font size, bold/italic and colour are kept).
 
-Sonuç Word'de orijinale çok yakın görünür; yazılar düzeltilebilir ama
-paragraf akışı yoktur (sunumdaki gibi kutu kutu düzenlenir).
-Dış bağımlılık yok: DOCX doğrudan XML olarak yazılır.
+The result looks very close to the original in Word; the text can be corrected but
+there is no paragraph flow (edited box by box, like a presentation).
+No external dependency: the DOCX is written directly as XML.
 """
 
 from __future__ import annotations
@@ -25,11 +25,11 @@ try:
 except ImportError:  # pragma: no cover
     try:
         import fitz as pymupdf  # type: ignore
-    except ImportError:          # install.py kütüphaneler kurulmadan da yükleyebilsin
+    except ImportError:          # so install.py can load it before the libraries are installed
         pymupdf = None  # type: ignore
 
 EMU = 12700          # 1 pt = 12700 EMU
-TWIP = 20            # 1 pt = 20 twip
+TWIP = 20            # 1 pt = 20 twips
 BG_DPI = 150
 
 _FONT_MAP = [
@@ -45,7 +45,7 @@ _FONT_MAP = [
 
 
 def map_font(name: str) -> str:
-    base = name.split("+", 1)[-1]                       # alt küme öneki: ABCDEF+
+    base = name.split("+", 1)[-1]                       # subset prefix: ABCDEF+
     low = base.lower().replace(" ", "")
     for pat, word in _FONT_MAP:
         if re.search(pat, low):
@@ -55,13 +55,13 @@ def map_font(name: str) -> str:
     return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", base) or "Calibri"
 
 
-# ---------------------------------------------------------------- sayfa analizi
+# ---------------------------------------------------------------- page analysis
 
 def _lines(page, cmap=None):
-    """Yatay metin satırları: [(bbox, [(text, font, size, bold, italic, color)])]"""
+    """Horizontal text lines: [(bbox, [(text, font, size, bold, italic, color)])]"""
     from .textfix import _fix_chars_raw
     flags = (pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_PRESERVE_LIGATURES
-             | pymupdf.TEXT_CID_FOR_UNKNOWN_UNICODE)   # kodu koru: textfix glif adından çözer
+             | pymupdf.TEXT_CID_FOR_UNKNOWN_UNICODE)   # keep the code: textfix resolves it from the glyph name
     out_blocks = []
     for b in page.get_text("dict", flags=flags)["blocks"]:
         if b.get("type") != 0:
@@ -69,19 +69,19 @@ def _lines(page, cmap=None):
         lines = []
         for ln in b["lines"]:
             dx, dy = ln["dir"]
-            if abs(dy) > 0.01 or dx < 0:          # dikey/döndürülmüş yazı arka planda kalır
+            if abs(dy) > 0.01 or dx < 0:          # vertical/rotated text stays in the background
                 continue
             spans = []
             prev_font = None
             for s in ln["spans"]:
                 fm = (cmap or {}).get(s["font"].split("+", 1)[-1])
                 raw = s["text"]
-                _fix_chars_raw(s, fm)            # μ gibi kayıp semboller, ﬁ/ﬂ → fi/fl
+                _fix_chars_raw(s, fm)            # lost symbols like μ, ﬁ/ﬂ → fi/fl
                 if not s["text"]:
                     continue
                 font = s["font"]
                 symbol = bool(fm) and raw.strip() != "" and all(ch in fm or ch.isspace() for ch in raw)
-                if symbol and prev_font:         # sembol fontu Word'de yok: harfi metin fontuyla yaz
+                if symbol and prev_font:         # the symbol font doesn't exist in Word: write the letter with the text font
                     font = prev_font
                 if not symbol:
                     prev_font = font
@@ -95,21 +95,21 @@ def _lines(page, cmap=None):
 
 
 def _background(doc, pno: int, blocks) -> bytes:
-    """Sayfanın yalnızca metnini silip (çizim ve resimler kalır) resmini döndürür."""
+    """Returns an image of the page with only its text removed (drawings and images stay)."""
     tmp = pymupdf.open()
     tmp.insert_pdf(doc, from_page=pno, to_page=pno)
     page = tmp[0]
     for lines in blocks:
         for rect, _ in lines:
             page.add_redact_annot(rect, fill=False)
-    page.apply_redactions(images=0, graphics=0, text=0)  # sadece yazıyı kaldır
+    page.apply_redactions(images=0, graphics=0, text=0)  # remove the text only
     pix = page.get_pixmap(dpi=BG_DPI, alpha=False)
     data = pix.tobytes("jpeg", jpg_quality=85)
     tmp.close()
     return data
 
 
-# ---------------------------------------------------------------- XML üretimi
+# ---------------------------------------------------------------- XML generation
 
 def _run(text, font, size, bold, italic, color) -> str:
     f = escape(map_font(font), {'"': "&quot;"})
@@ -131,7 +131,7 @@ def _next_id() -> int:
 def _anchor(x, y, w, h, graphic: str, behind: bool, name: str) -> str:
     i = _next_id()
     is_shape = "wordprocessingShape" in graphic
-    # Metin kutularını Word'ün kendi yazdığı gibi mc:AlternateContent içine sar
+    # Wrap the text boxes in mc:AlternateContent, the way Word itself writes them
     pre, post = ("<mc:AlternateContent><mc:Choice Requires=\"wps\">", "</mc:Choice></mc:AlternateContent>") \
         if is_shape else ("", "")
     return (f'<w:r>{pre}<w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" '
@@ -167,10 +167,10 @@ def _textbox(paras: str, w, h) -> str:
 
 
 def _stack_groups(lines):
-    """Bir bloğu 'alt alta duran' satır gruplarına böler.
+    """Splits a block into groups of lines 'stacked on top of each other'.
 
-    PDF bloğunda yan yana duran satırlar (ör. kutudaki '1' ve yanındaki başlık)
-    tek kutuda alt alta paragraf olursa kayar ve kesilir; bunlar ayrı kutu olur.
+    Lines side by side in a PDF block (e.g. the '1' in a box and the heading next to it)
+    shift and get cut if they become stacked paragraphs in one box; they become separate boxes.
     """
     groups: list[list] = []
     for r, spans in sorted(lines, key=lambda l: (round(l[0].y0, 1), l[0].x0)):
@@ -192,7 +192,7 @@ def _stack_groups(lines):
 
 
 def _block_xml(lines) -> str:
-    """Bir metin bloğu → konumlu metin kutusu. Her satır kendi paragrafı."""
+    """One text block → a positioned text box. Each line is its own paragraph."""
     box = pymupdf.Rect(lines[0][0])
     for r, _ in lines[1:]:
         box |= r
@@ -202,8 +202,8 @@ def _block_xml(lines) -> str:
         size = max(s[2] for s in spans)
         line_h = max(r.height, size * 1.05)
         if i + 1 < len(lines):
-            # satır yüksekliği = PDF'teki satır aralığı. Satır kutusu (ör. μ'lü satırda 13.3 pt) aralıktan
-            # (11.9 pt) büyük olunca her satır biraz aşağı kayıyor, paragraf alttakinin üstüne biniyordu.
+            # line height = the line spacing in the PDF. When the line box (e.g. 13.3 pt for a line with μ) was
+            # bigger than the spacing (11.9 pt), each line moved down a little and paragraphs overlapped the one below.
             pitch = lines[i + 1][0].y0 - r.y0
             if size * 0.8 <= pitch < line_h:
                 line_h = pitch
@@ -214,7 +214,7 @@ def _block_xml(lines) -> str:
                f'<w:ind w:left="{round((r.x0 - box.x0) * TWIP)}"/></w:pPr>')
         paras.append("<w:p>" + ppr + "".join(_run(*s) for s in spans) + "</w:p>")
     height = (prev_bottom - box.y0) + 2
-    width = box.width * 1.12 + 4  # Word yazı tipi biraz geniş çıkarsa kesilmesin
+    width = box.width * 1.12 + 4  # don't cut the text if the Word font comes out slightly wider
     return _anchor(box.x0, box.y0, width, height, _textbox("".join(paras), width, height), False, "Metin")
 
 
@@ -248,7 +248,7 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None) -> None:
         sect = (f'<w:sectPr><w:pgSz w:w="{round(W * TWIP)}" w:h="{round(H * TWIP)}"{orient}/>'
                 '<w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/>'
                 '</w:sectPr>')
-        # Paragrafın kendisi görünmez ve küçük; her sayfa ayrı bölüm
+        # The paragraph itself is invisible and small; every page is a separate section
         p_props = '<w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>'
         if pno < n - 1:
             body.append(f'<w:p><w:pPr>{p_props}{sect}</w:pPr>{content}</w:p>')
@@ -293,7 +293,7 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None) -> None:
 
 
 def looks_like_slides(doc) -> bool:
-    """Slayt/tasarım belgesi mi? Yatay sayfalar ya da sunum programından çıkmış."""
+    """Slide/design document? Landscape pages or produced by presentation software."""
     meta = " ".join(str(v) for v in (doc.metadata or {}).values()).lower()
     if any(k in meta for k in ("powerpoint", "keynote", "impress", "google slides")):
         return True

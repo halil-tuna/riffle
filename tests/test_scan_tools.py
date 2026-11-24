@@ -1,4 +1,4 @@
-"""Tarama düzeltme, boş sayfa silme, resim çıkarma, klasörde arama."""
+"""Scan cleanup, blank page removal, image extraction, folder search."""
 
 import io
 
@@ -21,7 +21,7 @@ def _skewed_scan(path, src, angles, blank_back=False):
         im.save(b, "JPEG", quality=75)
         n = out.new_page(width=p.rect.width, height=p.rect.height)
         n.insert_image(n.rect, stream=b.getvalue())
-        if blank_back:                                   # tarayıcıdan gelen boş arka yüz: gri + leke
+        if blank_back:                                   # blank back side from the scanner: grey + specks
             im = Image.new("L", (1240, 1754), 238)
             ImageDraw.Draw(im).ellipse((600, 900, 606, 906), fill=90)
             b = io.BytesIO()
@@ -42,10 +42,10 @@ def test_skew_detect_and_fix(tmp_path):
     msgs = []
     out = docops.fix_scan([scan], msgs.append)[0]
     r = pymupdf.open(out)
-    assert len(r) == 3                                  # 3 arka yüz silindi
+    assert len(r) == 3                                  # 3 back sides removed
     assert all(abs(docops.skew_angle(pg)) <= 0.25 for pg in r)
     assert any("eğikliği düzeltildi" in m and "3 boş sayfa" in m for m in msgs)
-    # kayıpsız: resim yeniden sıkıştırılmadı
+    # lossless: the image was not recompressed
     assert r.extract_image(r[0].get_images()[0][0])["ext"] == "jpeg"
 
 
@@ -62,7 +62,7 @@ def test_blank_pages(tmp_path):
         if i in (0, 3):
             _text(p, (72, 100), f"Dolu sayfa {i}")
         if i == 2:
-            p.draw_rect(pymupdf.Rect(100, 100, 400, 300), fill=(0.2, 0.2, 0.2))   # yazısız ama dolu
+            p.draw_rect(pymupdf.Rect(100, 100, 400, 300), fill=(0.2, 0.2, 0.2))   # no text but filled
     d.save(tmp_path / "b.pdf")
     out = docops.remove_blank_pages([tmp_path / "b.pdf"], noop)[0]
     assert len(pymupdf.open(out)) == 3
@@ -83,19 +83,19 @@ def test_extract_images(tmp_path):
     png = io.BytesIO()
     Image.new("RGBA", (200, 200), (255, 0, 0, 100)).save(png, "PNG")
     p1.insert_image(pymupdf.Rect(50, 50, 450, 350), stream=jpg.getvalue())
-    p2.insert_image(pymupdf.Rect(50, 50, 250, 250), stream=png.getvalue())       # saydam
+    p2.insert_image(pymupdf.Rect(50, 50, 250, 250), stream=png.getvalue())       # transparent
     tiny = io.BytesIO()
     Image.new("RGB", (16, 16), (0, 0, 0)).save(tiny, "PNG")
-    p2.insert_image(pymupdf.Rect(300, 50, 316, 66), stream=tiny.getvalue())     # ikon: atlanır
+    p2.insert_image(pymupdf.Rect(300, 50, 316, 66), stream=tiny.getvalue())     # icon: skipped
     xref = p1.get_images()[0][0]
-    p2.insert_image(pymupdf.Rect(50, 400, 250, 550), xref=xref)                  # aynı resim tekrar
+    p2.insert_image(pymupdf.Rect(50, 400, 250, 550), xref=xref)                  # the same image again
     d.save(tmp_path / "r.pdf")
     msgs = []
     folder = docops.extract_images([tmp_path / "r.pdf"], msgs.append)[0]
     files = sorted(f.name for f in folder.iterdir())
     assert files == ["sayfa001_1.jpg", "sayfa002_1.png"]
-    assert Image.open(folder / "sayfa001_1.jpg").size == (400, 300)               # orijinal çözünürlük
-    assert Image.open(folder / "sayfa002_1.png").mode in ("RGBA", "LA")          # saydamlık korundu
+    assert Image.open(folder / "sayfa001_1.jpg").size == (400, 300)               # original resolution
+    assert Image.open(folder / "sayfa002_1.png").mode in ("RGBA", "LA")          # transparency kept
     assert any("1 küçük" in m for m in msgs)
 
 
@@ -103,7 +103,7 @@ def test_extract_images(tmp_path):
 def test_search_folder(tmp_path, q, expect):
     root = tmp_path / "Dersler"
     (root / "alt").mkdir(parents=True)
-    make_text_pdf(root / "ders.pdf", pages=1, table=False)       # "öğrenci" geçiyor
+    make_text_pdf(root / "ders.pdf", pages=1, table=False)       # contains "öğrenci"
     (root / "alt" / "not.txt").write_text("İSTANBUL'da Öğrenci buluşması", encoding="utf-8")
     hits, scanned, failed = search.search(root, q)
     assert len({h.path for h in hits}) == expect
@@ -144,7 +144,7 @@ def test_fold_keeps_length():
 
 
 def test_extract_images_dedupes_copies(tmp_path):
-    """Aynı resim her sayfada ayrı nesne olarak gömülü (Word çıktısı gibi): tek dosya çıkmalı."""
+    """The same image embedded as a separate object on every page (like Word output): one file must come out."""
     jpg = io.BytesIO()
     Image.new("RGB", (400, 300), (10, 120, 200)).save(jpg, "JPEG")
     other = io.BytesIO()
@@ -157,7 +157,7 @@ def test_extract_images_dedupes_copies(tmp_path):
         if i == 3:
             p.insert_image(pymupdf.Rect(50, 400, 350, 700), stream=other.getvalue())
         out.insert_pdf(d)
-    assert len({pg.get_images()[0][0] for pg in out}) == 6          # gerçekten 6 ayrı nesne
+    assert len({pg.get_images()[0][0] for pg in out}) == 6          # really 6 separate objects
     out.save(tmp_path / "kopya.pdf")
     msgs = []
     folder = docops.extract_images([tmp_path / "kopya.pdf"], msgs.append)[0]

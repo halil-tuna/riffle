@@ -1,4 +1,4 @@
-"""Hedef boyuta sıkıştırma, fotoğraftan belge, klasörü yer imli PDF, yer imleri."""
+"""Compress to target size, photo to document, folder to bookmarked PDF, bookmarks."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from riffle.actions import ConversionError, merge_pdfs
 cv2 = pytest.importorskip("cv2")
 
 
-# ----------------------------------------------------------------- hedef boyut
+# ----------------------------------------------------------------- target size
 
 @pytest.mark.parametrize("text,mb", [("2", 2), ("1,5", 1.5), ("1.5 MB", 1.5), ("500kb", 500 / 1024), ("300 KB", 300 / 1024)])
 def test_parse_size(text, mb):
@@ -49,7 +49,7 @@ def test_compress_to_target_meets_limit(big_pdf, target):
 
 
 def test_compress_to_target_prefers_quality(big_pdf):
-    """Gevşek hedef, sıkı hedeften daha büyük (daha kaliteli) sonuç vermeli."""
+    """A loose target must give a bigger (higher quality) result than a tight one."""
     loose = tools.compress_to_target([big_pdf], noop, target="5")[0].stat().st_size
     tight = tools.compress_to_target([big_pdf], noop, target="200kb")[0].stat().st_size
     assert loose >= tight
@@ -67,15 +67,15 @@ def test_compress_to_target_impossible(big_pdf):
         tools.compress_to_target([big_pdf], noop, target="25kb")
 
 
-# ----------------------------------------------------------------- fotoğraftan belge
+# ----------------------------------------------------------------- photo to document
 
 def _corner_error(found, truth):
     return float(np.max(np.linalg.norm(np.array(found) - np.array(truth), axis=1)))
 
 
-@pytest.mark.parametrize("desk,light", [((40, 70, 110), True),      # kahverengi masa, ışık eğimli
-                                        ((95, 95, 95), False),      # gri masa (renk ayrımı yok)
-                                        ((30, 30, 30), True)])      # koyu masa
+@pytest.mark.parametrize("desk,light", [((40, 70, 110), True),      # brown desk, sloping light
+                                        ((95, 95, 95), False),      # grey desk (no colour separation)
+                                        ((30, 30, 30), True)])      # dark desk
 def test_scan_finds_corners(work, desk, light):
     from riffle import scan
     p = make_photo(work / "foto.jpg", desk=desk, light=light)
@@ -85,7 +85,7 @@ def test_scan_finds_corners(work, desk, light):
 
 
 def test_scan_cropped_photo_keeps_whole(work):
-    """Zaten kırpılmış (kâğıt tüm kareyi kaplıyor) fotoğrafta düzeltme yapılmamalı."""
+    """A photo that is already cropped (the paper fills the whole frame) must not be corrected."""
     from riffle import scan
     p = make_photo(work / "kirpik.jpg", corners=[[0, 0], [3199, 0], [3199, 2399], [0, 2399]], light=False)
     assert scan.find_corners(cv2.imdecode(np.fromfile(str(p), np.uint8), cv2.IMREAD_COLOR)) is None
@@ -100,7 +100,7 @@ def test_scan_output_is_clean_white_paper(work):
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
     assert ok and h > w, "perspektif düzeltilmiş dikey sayfa"
     assert np.percentile(img, 50) > 235, "kâğıt beyaz olmalı (gölge temizlenmiş)"
-    corner = img[int(0.9 * h):, :int(0.1 * w)]          # gölgeli köşe
+    corner = img[int(0.9 * h):, :int(0.1 * w)]          # shadowed corner
     assert corner.mean() > 225
 
 
@@ -121,16 +121,16 @@ def test_photo_exif_rotation_respected(work):
     from PIL import Image
     from riffle import scan
     p = make_photo(work / "yan.jpg")
-    im = Image.open(p).rotate(90, expand=True)           # sensör yan çekmiş
+    im = Image.open(p).rotate(90, expand=True)           # sensor shot sideways
     exif = Image.Exif()
-    exif[0x0112] = 6                                      # "göstermek için saat yönünde 90° çevir"
+    exif[0x0112] = 6                                      # "rotate 90° clockwise to display"
     q = work / "yan_exif.jpg"
     im.save(q, exif=exif)
     data, (w, h), ok = scan.photo_to_page_image(q)
     assert ok and h > w, "EXIF yönü uygulanmalı"
 
 
-# ----------------------------------------------------------------- yer imleri
+# ----------------------------------------------------------------- bookmarks
 
 def test_merge_adds_bookmarks_and_keeps_source_toc(work):
     a = make_text_pdf(work / "Bölüm 1.pdf", pages=2, table=False)
@@ -155,7 +155,7 @@ def test_organizer_bookmarks_per_source(work):
         assert d.get_toc() == [[1, "a", 1], [1, "b", 2], [1, "a", 3]]
 
 
-# ----------------------------------------------------------------- klasör
+# ----------------------------------------------------------------- folder
 
 @pytest.fixture
 def course(work):
@@ -226,13 +226,13 @@ def test_file_actions_reject_folders(course):
 @pytest.mark.parametrize("tilt_x,tilt_y,rot_z,dist", [(28, 12, 6, 520), (10, 5, 2, 520), (40, -15, -8, 600),
                                                       (-30, 20, 15, 550), (35, 0, 90, 650)])
 def test_true_aspect_recovers_a4_from_camera_views(tilt_x, tilt_y, rot_z, dist):
-    """Eğik çekimde kâğıdın gerçek oranı (A4 = 0.707) kamera geometrisinden bulunmalı."""
+    """For an angled shot the real aspect of the paper (A4 = 0.707) must come from the camera geometry."""
     from conftest import camera_corners
     from riffle import scan
     c = scan._order(np.array(camera_corners(tilt_x=tilt_x, tilt_y=tilt_y, rot_z=rot_z, dist=dist)))
     r = scan.true_aspect(c, 3200, 2400)
     assert r is not None
     expected = 210 / 297 if abs(rot_z) < 45 else 297 / 210
-    # tek yönlü perspektifte odak uzaklığı varsayılır → biraz daha geniş tolerans (A4'e oturtma %8)
+    # with one-directional perspective the focal length is assumed → slightly wider tolerance (A4 snapping at 8%)
     tol = 0.03 if tilt_y else 0.08
     assert abs(r - expected) / expected < tol, r

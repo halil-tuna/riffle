@@ -1,7 +1,7 @@
-"""Ayarlar: menüde görünen araçlar, sık kullanılanlar, çıktı klasörü, paralel çalışma.
+"""Settings: tools shown in the menu, favourites, output folder, parallel processing.
 
-ayarlar.json ve kullanim.json kullanıcı ayar klasöründe durur (Windows: %APPDATA%\\Riffle,
-Linux: ~/.config/riffle). Dosya bozuk ya da yoksa varsayılanlar kullanılır.
+ayarlar.json and kullanim.json live in the user settings folder (Windows: %APPDATA%\\Riffle,
+Linux: ~/.config/riffle). If a file is broken or missing, the defaults are used.
 """
 
 from __future__ import annotations
@@ -15,15 +15,15 @@ from . import APP_NAME
 from .i18n import T
 
 DEFAULTS = {
-    "hidden": [],             # menüde gösterilmeyen işlem kimlikleri
-    "pinned": [],             # her zaman menünün en üstünde
-    "auto_favorites": True,   # en çok kullanılan 3 işlem kendiliğinden üste çıkar
+    "hidden": [],             # action ids not shown in the menu
+    "pinned": [],             # always at the top of the menu
+    "auto_favorites": True,   # the 3 most used actions move to the top by themselves
     "output": "beside",       # beside | desktop | folder | ask
     "output_dir": "",
-    "parallel": True,         # çok dosyada işlemciyi tam kullan
+    "parallel": True,         # use the whole CPU for many files
     "theme": "system",        # system | light | dark
-    "check_updates": True,    # haftada bir GitHub'da yeni sürüm var mı
-    "language": "auto",       # auto (sistem) | tr | en
+    "check_updates": True,    # weekly check for a new release on GitHub
+    "language": "auto",       # auto (system) | tr | en
 }
 FAV_AUTO = 3
 FAV_MIN_USES = 3
@@ -64,7 +64,7 @@ def usage() -> dict:
 
 
 def favorites(s: dict | None = None, use: dict | None = None) -> list[str]:
-    """Menünün en üstüne çıkacak işlemler: sabitlenenler + (otomatikse) en çok kullanılanlar."""
+    """Actions that go to the top of the menu: pinned ones + (if automatic) the most used."""
     from .actions import BY_ID
     s = s or load()
     use = usage() if use is None else use
@@ -78,7 +78,7 @@ def favorites(s: dict | None = None, use: dict | None = None) -> list[str]:
 
 
 def record_use(action_id: str) -> bool:
-    """Kullanım sayacını artırır. Sık kullanılanlar listesi değiştiyse True (menü yenilenmeli)."""
+    """Increments the usage counter. True if the favourites list changed (the menu should be refreshed)."""
     try:
         s = load()
         before = favorites(s)
@@ -91,8 +91,8 @@ def record_use(action_id: str) -> bool:
 
 
 def refresh_menu() -> None:
-    """Menüyü ayarlara göre yeniden kurar (sessiz)."""
-    if os.environ.get("RIFFLE_NO_MENU_REFRESH"):       # otomatik testler
+    """Rebuilds the menu according to the settings (silently)."""
+    if os.environ.get("RIFFLE_NO_MENU_REFRESH"):       # automated tests
         return
     import io
     from contextlib import redirect_stdout
@@ -105,7 +105,7 @@ def refresh_menu() -> None:
         install.install_windows() if install.IS_WIN else install.install_linux()
 
 
-# ------------------------------------------------------------------ çıktı klasörü
+# ------------------------------------------------------------------ output folder
 
 def desktop() -> Path:
     if sys.platform == "win32":
@@ -133,7 +133,7 @@ def desktop() -> Path:
 
 
 def output_target(s: dict | None = None, ask=None) -> Path | None:
-    """Ayarlara göre çıktı klasörü; None = kaynağın yanına. ask: klasör soran fonksiyon."""
+    """Output folder according to the settings; None = next to the source. ask: function that asks for a folder."""
     s = s or load()
     mode = s["output"]
     if mode == "desktop":
@@ -166,7 +166,7 @@ def run(paths=None, progress=print, **_) -> list:
     gen = ttk.Frame(nb, padding=(16, 14))
     nb.add(gen, text=T("Genel"))
 
-    # --- Menü sekmesi
+    # --- Menu tab
     menu_tab = ttk.Frame(nb, padding=(16, 12))
     nb.add(menu_tab, text=T("Sağ tık menüsü"))
     ttk.Label(menu_tab, text=T("Göster: menüde görünsün · Üstte: menünün en başına sabitle"),
@@ -196,7 +196,7 @@ def run(paths=None, progress=print, **_) -> list:
     ttk.Label(inner, text=T("İşlem"), style="Strong.TLabel").grid(row=0, column=2, sticky="w", padx=(6, 0))
     ttk.Label(inner, text=T("Kullanım"), style="Strong.TLabel").grid(row=0, column=3, padx=12)
     groups: dict = {}
-    for a in ACTIONS:                        # menüdeki gruplar sırasıyla, her grup bir kez
+    for a in ACTIONS:                        # groups of the menu in order, each group once
         if a.id not in NEVER_HIDE:
             g = a.group or (T("Klasör") if "<klasör>" in a.extensions and len(a.extensions) == 1 else
                             T("Görsel / Office") if "pdf" not in a.extensions else T("Genel"))
@@ -217,7 +217,7 @@ def run(paths=None, progress=print, **_) -> list:
         show_vars[a.id], pin_vars[a.id] = sv, pv
         row += 1
 
-    # --- Genel sekmesi
+    # --- General tab
     ttk.Label(gen, text=T("Dil · Language"), style="Strong.TLabel").pack(anchor="w")
     lang_var = tk.StringVar(value=s.get("language", "auto"))
     lrow0 = ttk.Frame(gen)
@@ -231,7 +231,7 @@ def run(paths=None, progress=print, **_) -> list:
     look = tk.StringVar(value=s.get("theme", "system"))
 
     def preview(*_):
-        """Seçilen görünümü bu pencerede hemen dene (kaydedince bütün pencerelere geçer)."""
+        """Try the chosen appearance in this window right away (applies to all windows once saved)."""
         dark = theme.system_is_dark() if look.get() == "system" else look.get() == "dark"
         cv.configure(background=theme.switch(root, dark).bg)
     lrow = ttk.Frame(gen)
@@ -313,7 +313,7 @@ def run(paths=None, progress=print, **_) -> list:
             return
         save(s)
         from . import i18n
-        i18n.set_lang(None)                    # menüler yeni dilde yazılsın
+        i18n.set_lang(None)                    # write the menus in the new language
         try:
             refresh_menu()
             status.configure(text=T("✔ Kaydedildi, menü güncellendi."))

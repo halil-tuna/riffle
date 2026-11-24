@@ -1,4 +1,4 @@
-"""İmza / yazı / görsel yerleştirme modeli."""
+"""Signature / text / image placement model."""
 
 import io
 
@@ -18,13 +18,13 @@ def _red_png(w=200, h=100):
 
 
 def _signature_photo(path):
-    """Gri, gölgeli kâğıda mavi tükenmez imza fotoğrafı."""
+    """Photo of a blue ballpoint signature on grey, shadowed paper."""
     w, h = 1200, 700
     im = Image.new("RGB", (w, h))
     px = im.load()
     for y in range(h):
         for x in range(w):
-            v = int(205 + 35 * x / w - 25 * y / h)          # eğimli aydınlatma
+            v = int(205 + 35 * x / w - 25 * y / h)          # sloping light
             px[x, y] = (v, v, v - 6)
     d = ImageDraw.Draw(im)
     pts = [(300 + i * 12, 350 + int(60 * ((i % 7) - 3) / 3)) for i in range(45)]
@@ -40,11 +40,11 @@ def test_clean_signature(tmp_path):
     im = Image.open(io.BytesIO(png))
     assert im.mode == "RGBA"
     w, h = im.size
-    assert 500 < w < 640 and 150 < h < 260                   # sıkıca kırpıldı (kâğıt atıldı)
+    assert 500 < w < 640 and 150 < h < 260                   # tightly cropped (paper dropped)
     a = im.getchannel("A")
-    assert a.getpixel((2, 2)) == 0                           # arka plan şeffaf
+    assert a.getpixel((2, 2)) == 0                           # transparent background
     assert max(a.tobytes()) == 255
-    # şeffaf olmayan piksel oranı makul (gölge/kâğıt mürekkep sayılmadı)
+    # share of non-transparent pixels is reasonable (shadow/paper not counted as ink)
     ink = sum(1 for v in a.tobytes() if v > 128) / (w * h)
     assert 0.02 < ink < 0.35
 
@@ -68,7 +68,7 @@ def test_place_image_keeps_aspect():
     r = sm.place_image(_red_png(400, 100), page, width=200)
     assert abs((r[2] - r[0]) / (r[3] - r[1]) - 4) < 0.01
     assert 0 <= r[0] and r[2] <= 595 and r[3] <= 842
-    r = sm.place_image(_red_png(100, 2000), page, width=300)          # çok uzun görsel sayfaya sığar
+    r = sm.place_image(_red_png(100, 2000), page, width=300)          # a very tall image fits the page
     assert r[3] - r[1] <= 842 * 0.8 + 0.1
 
 
@@ -84,7 +84,7 @@ def test_apply_rotated_pages(tmp_path, rot):
     d[0].set_rotation(rot)
     d.save(tmp_path / f"r{rot}.pdf")
     vis_page = pymupdf.open(tmp_path / f"r{rot}.pdf")[0].rect
-    img_rect = (40, 60, 140, 110)                      # görünen koordinat, sol üst
+    img_rect = (40, 60, 140, 110)                      # visible coordinates, top left
     txt = sm.Stamp("text", 0, sm.text_rect("İmza: Halil Ğüşıöç", (40, vis_page.height - 80), 14),
                    text="İmza: Halil Ğüşıöç")
     out = sm.apply(tmp_path / f"r{rot}.pdf",
@@ -93,11 +93,11 @@ def test_apply_rotated_pages(tmp_path, rot):
     page = pymupdf.open(out)[0]
     assert page.rotation == rot
     pix = page.get_pixmap(dpi=72)
-    assert pix.pixel(90, 85)[:3] == (220, 20, 20)        # görsel görünen yerde
+    assert pix.pixel(90, 85)[:3] == (220, 20, 20)        # the image is where it appears
     assert pix.pixel(200, 85)[:3] != (220, 20, 20)
     words = [w for w in page.get_text("words") if "Halil" in w[4]]
     assert words, page.get_text()
-    # yazı da görünen konumda (rotation_matrix ile görünen koordinata çevir)
+    # the text is also at the visible position (convert to visible coordinates with rotation_matrix)
     r = pymupdf.Rect(words[0][:4]) * page.rotation_matrix
     assert abs(r.y1 - (vis_page.height - 80 + 17)) < 12 and r.x0 < 120
     assert "Ğüşıöç" in page.get_text()
@@ -109,7 +109,7 @@ def test_apply_text_kept_inside_box(tmp_path):
     rect = sm.text_rect(text, (300, 600), 18)
     out = sm.apply(src, [sm.Stamp("text", 0, rect, text=text)])
     t = pymupdf.open(out)[0].get_text()
-    assert "Onaylandı" in t and "23.11.2026" in t                  # iki satır da sığdı, kesilmedi
+    assert "Onaylandı" in t and "23.11.2026" in t                  # both lines fit, nothing cut
 
 
 def test_copy_to_pages(tmp_path):

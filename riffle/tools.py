@@ -1,5 +1,5 @@
-"""Ek araçlar: sayfa işlemleri, filigran, sayfa numarası, OCR, Excel/PowerPoint,
-görsel dönüştürme. Hepsi actions.py'deki imzayla çalışır:
+"""Extra tools: page operations, watermark, page numbers, OCR, Excel/PowerPoint,
+image conversion. All of them use the signature from actions.py:
 
     func(paths: list[Path], progress, **kwargs) -> list[Path]
 """
@@ -12,11 +12,11 @@ from pathlib import Path
 from .actions import ConversionError, fix_tounicode, open_pdf, pymupdf, unique_path
 from .i18n import T
 
-# ============================================================ yardımcılar
+# ============================================================ helpers
 
 
 def parse_pages(spec: str, n: int) -> list[int]:
-    """'1-3, 5, 8-' / 'son' / 'tek' / 'çift' → 0 tabanlı sayfa indeksleri (sıralı, tekrarsız)."""
+    """'1-3, 5, 8-' / 'last' / 'odd' / 'even' (Turkish: 'son' / 'tek' / 'çift') → 0-based page indexes (sorted, unique)."""
     spec = (spec or "").strip().lower().replace(" ", "")
     if not spec:
         raise ConversionError(T("Sayfa aralığı boş."))
@@ -53,11 +53,11 @@ def _font_file() -> str | None:
 
 
 def _visual_point(page, x: float, y: float):
-    """Sayfanın GÖRÜNEN (döndürülmüş) koordinatındaki noktayı içerik koordinatına çevirir."""
+    """Converts a point in the page's VISIBLE (rotated) coordinates to content coordinates."""
     return pymupdf.Point(x, y) * page.derotation_matrix
 
 
-# ============================================================ sayfa işlemleri
+# ============================================================ page operations
 
 
 def extract_pages(paths, progress, pages: str = "", **_):
@@ -118,7 +118,7 @@ def repair_pdf(paths, progress, **_):
                 doc.save(out, garbage=4, deflate=True, clean=True)
                 note = T("yapısal hatalar onarıldı.") if repaired else T("hata bulunmadı, yeniden düzenlendi.")
             except Exception:
-                # Kademeli kurtarma: sayfaları tek tek kopyala; kopyalanamayanın görüntüsünü al
+                # Gradual recovery: copy pages one by one; take an image of any page that can't be copied
                 out.unlink(missing_ok=True)
                 new, copied, imaged, lost = pymupdf.open(), 0, 0, 0
                 for i in range(len(doc)):
@@ -149,7 +149,7 @@ def repair_pdf(paths, progress, **_):
     return outputs
 
 
-# ============================================================ sayfa numarası / filigran
+# ============================================================ page numbers / watermark
 
 
 def add_page_numbers(paths, progress, fmt: str = "{n} / {total}", **_):
@@ -161,7 +161,7 @@ def add_page_numbers(paths, progress, fmt: str = "{n} / {total}", **_):
             total = len(doc)
             for i, page in enumerate(doc):
                 text = fmt.format(n=i + 1, total=total)
-                W, H = page.rect.width, page.rect.height      # görünen boyut
+                W, H = page.rect.width, page.rect.height      # visible size
                 size = max(8.0, min(11.0, W / 60))
                 font = pymupdf.Font(fontfile=ffile) if ffile else pymupdf.Font("helv")
                 tw = font.text_length(text, fontsize=size)
@@ -193,7 +193,7 @@ def add_watermark(paths, progress, text: str = "", **_):
                 diag = (W ** 2 + H ** 2) ** 0.5
                 size = min(120.0, 0.75 * diag / max(font.text_length(text, fontsize=1), 1))
                 tl = font.text_length(text, fontsize=size)
-                # Görünen sayfada sol-alttan sağ-üste giden yönü içerik koordinatına çevir
+                # Convert the bottom-left → top-right direction on the visible page to content coordinates
                 import math
                 c_v = pymupdf.Point(W / 2, H / 2)
                 center = c_v * page.derotation_matrix
@@ -241,7 +241,7 @@ def make_searchable(paths, progress, **_):
     return outputs
 
 
-# ============================================================ Excel / PowerPoint / Word birebir
+# ============================================================ Excel / PowerPoint / Word exact layout
 
 
 def pdf_to_excel(paths, progress, **_):
@@ -265,8 +265,8 @@ def pdf_to_excel(paths, progress, **_):
                     except Exception:
                         continue
                     for k, t in enumerate(tabs.tables):
-                        # hücre metnini MuPDF'in normal çıkarıcısıyla oku (find_tables'ın
-                        # kendi extract()'i bazı PDF'lerde harf sırasını karıştırıyor)
+                        # read the cell text with MuPDF's normal extractor (find_tables'
+                        # own extract() mixes up the letter order in some PDFs)
                         rows = [[(" ".join(page.get_text("text", clip=pymupdf.Rect(c)).split()) if c else None)
                                  for c in row.cells] for row in t.rows]
                         if len(rows) < 2 or max((len(r) for r in rows), default=0) < 2:
@@ -323,7 +323,7 @@ def pdf_to_word_exact(paths, progress, **_):
         progress(T("Word'e (birebir düzen) çevriliyor: {0}", p.name))
         out = unique_path(p.parent, p.stem, ".docx")
         with open_pdf(p):
-            pass  # şifre/bozukluk kontrolü
+            pass  # password/corruption check
         fixed_layout.convert(p, out, progress)
         outputs.append(out)
     return outputs
@@ -379,7 +379,7 @@ def pdf_to_pptx(paths, progress, **_):
     return outputs
 
 
-# ============================================================ görseller
+# ============================================================ images
 
 
 def _open_image(path: Path):
@@ -392,7 +392,7 @@ def _open_image(path: Path):
             raise ConversionError(T("HEIC için pillow-heif gerekli: pip install pillow-heif"))
     from PIL import ImageOps
     im = Image.open(path)
-    im = ImageOps.exif_transpose(im)  # telefon fotoğraflarının yönü
+    im = ImageOps.exif_transpose(im)  # orientation of phone photos
     if im.mode in ("RGBA", "LA", "P"):
         im = im.convert("RGBA")
         bg = Image.new("RGB", im.size, (255, 255, 255))
@@ -428,12 +428,12 @@ def shrink_images(paths, progress, max_side: int = 1920, **_):
     return outputs
 
 
-# ============================================================ sayfa düzenleyici
+# ============================================================ page organizer
 
 
 def merge_files(paths, progress, ordered: bool = False, image_mode: str = "a4", **_):
-    """PDF, görsel ve Word/Excel/PowerPoint dosyalarını verilen sırayla tek PDF yapar (pencere açmadan).
-    Office dosyaları tek LibreOffice çağrısında çevrilir; her dosya bir yer imi olur."""
+    """Turns PDF, image and Word/Excel/PowerPoint files into one PDF in the given order (without a window).
+    Office files are converted in a single LibreOffice call; every file becomes a bookmark."""
     from .actions import sorted_by_name
     from .organizer_model import Document
     paths = list(paths) if ordered else sorted_by_name(list(paths))
@@ -459,9 +459,9 @@ def organize(paths, progress, **_):
     return run(list(paths), progress)
 
 
-# ============================================================ hedef boyuta sıkıştır
+# ============================================================ compress to target size
 
-# (bu dpi'nin üstündeki görseller küçültülür, hedef dpi, JPEG kalitesi) — kaliteden ödüne doğru
+# (images above this dpi are downsampled, target dpi, JPEG quality) — from quality towards compromise
 _TARGET_STEPS = [(400, 300, 88), (300, 220, 85), (220, 180, 82), (170, 150, 78), (150, 130, 70), (130, 110, 62), (110, 96, 55),
                  (96, 84, 48), (84, 72, 42), (72, 60, 36), (60, 50, 30)]
 
@@ -478,7 +478,7 @@ def _parse_mb(text: str) -> float:
 
 
 def _size_tag(text: str) -> str:
-    """'2' → '2MB', '1.5' → '1,5MB', '300kb' → '300KB' (dosya adı için)."""
+    """'2' → '2MB', '1.5' → '1,5MB', '300kb' → '300KB' (for the file name)."""
     mb = _parse_mb(text)
     if mb < 1:
         return f"{round(mb * 1024)}KB"
@@ -491,7 +491,7 @@ def _try_compress(src: Path, dst: Path, step) -> int:
         if hasattr(doc, "rewrite_images"):
             doc.rewrite_images(dpi_threshold=threshold, dpi_target=target, quality=quality)
         try:
-            doc.subset_fonts()          # yalnızca kullanılan harfleri tut
+            doc.subset_fonts()          # keep only the glyphs that are used
         except Exception:
             pass
         doc.save(dst, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True,
@@ -519,7 +519,7 @@ def compress_to_target(paths, progress, target: str = "2", **_):
     outputs = []
     for p in paths:
         with open_pdf(p):
-            pass                                   # şifre / bozukluk kontrolü
+            pass                                   # password / corruption check
         size = p.stat().st_size
         label = human_size(limit)
         out = unique_path(p.parent, f"{p.stem}_{_size_tag(str(target))}_alti", ".pdf")
@@ -530,7 +530,7 @@ def compress_to_target(paths, progress, target: str = "2", **_):
             continue
         with tempfile.TemporaryDirectory(prefix="riffle_hedef_") as tmp:
             best = None
-            # İkili arama: hedefi tutturan EN YÜKSEK kaliteli adım
+            # Binary search: the HIGHEST quality step that meets the target
             lo, hi = 0, len(_TARGET_STEPS) - 1
             tried = {}
             while lo <= hi:
@@ -544,7 +544,7 @@ def compress_to_target(paths, progress, target: str = "2", **_):
                     lo = mid + 1
             note = ""
             if best is None:
-                # Son çare: sayfaları görüntüye çevir (metin seçilemez olur)
+                # Last resort: turn the pages into images (text is no longer selectable)
                 for dpi, q in ((110, 55), (90, 45), (72, 35)):
                     cand = Path(tmp) / f"r{dpi}.pdf"
                     progress(T("{0}: sayfalar görüntüye çevriliyor ({1} dpi)", p.name, dpi))
@@ -561,7 +561,7 @@ def compress_to_target(paths, progress, target: str = "2", **_):
     return outputs
 
 
-# ============================================================ fotoğraftan belge
+# ============================================================ photo to document
 
 
 def photos_to_document(paths, progress, ordered: bool = False, **_):
@@ -582,7 +582,7 @@ def photos_to_document(paths, progress, ordered: bool = False, **_):
     return [out]
 
 
-# ============================================================ klasörü tek PDF yap
+# ============================================================ folder to one PDF
 
 
 _SKIP = re.compile(r"^(~\$|\.|Thumbs\.db$|desktop\.ini$)", re.I)
@@ -593,9 +593,9 @@ def _natural(name: str):
 
 
 def folder_to_pdf(paths, progress, **_):
-    """Klasördeki (alt klasörler dahil) PDF, görsel ve Office dosyalarını doğal sırayla tek
-    PDF'te birleştirir. Her dosya bir yer imi, her alt klasör bir üst yer imi olur.
-    Çıktı klasörün YANINA yazılır (bir sonraki çalıştırmada kendisini içermesin)."""
+    """Merges the PDF, image and Office files in the folder (including subfolders) into one PDF in
+    natural order. Every file becomes a bookmark, every subfolder a parent bookmark.
+    The output is written NEXT TO the folder (so the next run doesn't include it)."""
     import tempfile
     from .actions import (IMAGES, OFFICE, PDF, append_with_bookmark, office_to_pdf_many, save_with_toc)
     outputs = []
@@ -606,8 +606,8 @@ def folder_to_pdf(paths, progress, **_):
         out_doc, toc, notes = pymupdf.open(), [], []
         counts = {"pdf": 0, "görsel": 0, "office": 0}
         with tempfile.TemporaryDirectory(prefix="riffle_klasor_") as tmp:
-            # Office dosyalarının hepsi tek LibreOffice çağrısıyla önceden çevrilir (her biri için
-            # programı yeniden açmak en yavaş kısımdı)
+            # All Office files are converted up front in one LibreOffice call (reopening the program
+            # for each one was the slowest part)
             office_files = [e for e in folder.rglob("*") if e.is_file()
                             and e.suffix.lower().lstrip(".") in OFFICE
                             and not any(_SKIP.match(part) for part in e.relative_to(folder).parts)]
@@ -627,7 +627,7 @@ def folder_to_pdf(paths, progress, **_):
                         before, mark = len(out_doc), len(toc)
                         toc.append([level, e.name, len(out_doc) + 1])
                         walk(e, level + 1)
-                        if len(out_doc) == before:       # boş alt klasör: yer imini geri al
+                        if len(out_doc) == before:       # empty subfolder: undo its bookmark
                             del toc[mark:]
                         continue
                     ext = e.suffix.lower().lstrip(".")

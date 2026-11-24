@@ -1,7 +1,8 @@
-"""PDF form doldurma: dilekçe, staj formu, başvuru formu gibi doldurulabilir PDF'ler.
+"""PDF form filling: fillable PDFs such as petitions, internship forms, application forms.
 
-Alanlar tek bir pencerede alt alta listelenir (etiket: formdaki açıklama, yoksa alanın solundaki yazı).
-İsteğe bağlı "düzleştir": alanlar sayfaya yazı olarak işlenir, sonradan değiştirilemez (e-posta/basım için).
+The fields are listed one below the other in a single window (label: the description in the form,
+otherwise the text to the left of the field). Optional "flatten": the fields are burned into the page
+as text and can no longer be changed (for e-mail/printing).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ class Field:
     label: str
     page: int
     value: object = ""
-    options: list = field(default_factory=list)   # combo/list seçenekleri; radio: (on_state, etiket)
+    options: list = field(default_factory=list)   # combo/list options; radio: (on_state, label)
     multiline: bool = False
     readonly: bool = False
     editable_choice: bool = False
@@ -34,17 +35,17 @@ class Field:
 
 
 def _nearby_label(page, rect, words) -> str:
-    """Alanın solundaki (aynı satırda) ya da hemen üstündeki yazı."""
+    """Text to the left of the field (on the same line) or right above it."""
     def same_line(w):
         cy = (w[1] + w[3]) / 2
         if abs(cy - (rect.y0 + rect.y1) / 2) < 8:
             return True
-        return rect.height > 24 and rect.y0 - 4 <= cy <= rect.y0 + 16     # çok satırlı alan: ilk satır hizası
+        return rect.height > 24 and rect.y0 - 4 <= cy <= rect.y0 + 16     # multi-line field: align with the first line
 
     left = [w for w in words if w[2] <= rect.x0 + 2 and same_line(w) and rect.x0 - w[2] < 220]
     if left:
         left.sort(key=lambda w: w[0])
-        # alana en yakın kesintisiz kelime dizisi
+        # the unbroken run of words closest to the field
         out, prev_x0 = [], None
         for w in sorted(left, key=lambda w: -w[2]):
             if prev_x0 is not None and prev_x0 - w[2] > 12:
@@ -74,7 +75,7 @@ def read_fields(doc) -> list[Field]:
             label = (w.field_label or "").strip() or _nearby_label(page, w.rect, words) or w.field_name
             ro = bool(w.field_flags & pymupdf.PDF_FIELD_IS_READ_ONLY)
             if t == pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON:
-                # radyo grubu: seçenek kimliği = gruptaki sıra numarası (bazı formlarda on_state yok)
+                # radio group: option id = position in the group (some forms have no on_state)
                 if w.field_name not in radios:
                     f = Field(w.field_name, RADIO, label, pno, "", readonly=ro, y=w.rect.y0, x=w.rect.x0)
                     radios[w.field_name] = f
@@ -85,7 +86,7 @@ def read_fields(doc) -> list[Field]:
                 right = sorted(x for x in words if x[0] >= w.rect.x1 - 1 and x[0] - w.rect.x1 < 80
                                and abs((x[1] + x[3]) / 2 - (w.rect.y0 + w.rect.y1) / 2) < 8)
                 seq, end = [], w.rect.x1
-                for x in right:                         # bitişik kelimeler; büyük boşlukta sonraki seçenek başlar
+                for x in right:                         # adjacent words; a large gap starts the next option
                     if x[0] - end > 8 or len(seq) >= 4:
                         break
                     seq.append(x[4])
@@ -112,7 +113,7 @@ def read_fields(doc) -> list[Field]:
 
 
 def fill(src: Path, values: dict, out: Path | None = None, flatten: bool = False) -> Path:
-    """values: {alan adı: değer}. Metin: str · onay kutusu: bool · radyo: seçenek sıra no ("0", "1"…) · liste: str."""
+    """values: {field name: value}. Text: str · checkbox: bool · radio: option index ("0", "1"…) · list: str."""
     radio_idx: dict = {}
     with open_pdf(src) as doc:
         for page in doc:
@@ -138,7 +139,7 @@ def fill(src: Path, values: dict, out: Path | None = None, flatten: bool = False
                     w.field_value = "" if v is None else str(v)
                 w.update()
         if flatten:
-            doc.bake(annots=False, widgets=True)       # alanlar sayfa içeriğine işlenir
+            doc.bake(annots=False, widgets=True)       # fields are burned into the page content
         from .actions import fix_tounicode
         fix_tounicode(doc)
         out = out or unique_path(src.parent, f"{src.stem}_doldurulmus", ".pdf")

@@ -1,8 +1,8 @@
-"""Hız: çok dosyayı işlemcinin bütün çekirdeklerinde işlemek, büyük PDF → Word'ü sayfa parçalarına bölmek,
-ve İptal düğmesi için ortak iptal bayrağı.
+"""Speed: processing many files on all CPU cores, splitting a large PDF → Word into page chunks,
+and the shared cancel flag for the Cancel button.
 
-Süreçler "spawn" ile başlar (Windows'un tek yolu; Linux'ta da pencere iş parçacığıyla çatallanma
-sorunlarını önler). Paketlenmiş .exe'de run.pyw multiprocessing.freeze_support() çağırır.
+Processes start with "spawn" (the only way on Windows; on Linux it also avoids fork problems with the
+window thread). In the packaged .exe, run.pyw calls multiprocessing.freeze_support().
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from .i18n import T
 
-CANCEL = threading.Event()        # İptal düğmesi bunu kurar
+CANCEL = threading.Event()        # the Cancel button sets this
 
 
 class Cancelled(BaseException):
-    """İptal: BaseException, çünkü araçlardaki 'except Exception' bloklarına takılmamalı."""
+    """Cancel: a BaseException, because it must not get caught in the 'except Exception' blocks of the tools."""
 
 
 def check_cancel() -> None:
@@ -49,7 +49,7 @@ def _init_worker(redirect: dict):
 
 
 def _run_one(action_id: str, path: str, kwargs: dict):
-    """Bir dosyayı ayrı süreçte işler: (çıktılar, notlar, hata)."""
+    """Processes one file in a separate process: (outputs, notes, error)."""
     from .actions import BY_ID, ConversionError
     notes: list[str] = []
     try:
@@ -71,7 +71,7 @@ def _kill(ex: ProcessPoolExecutor) -> None:
 
 
 def run_files(action_id: str, paths: list[Path], kwargs: dict, progress) -> tuple[list[Path], list[str]]:
-    """Dosyaları paralel işler. progress('ℹ …') notları ve 'n/N tamamlandı' iletileri gönderir."""
+    """Processes the files in parallel. Sends progress('ℹ …') notes and 'n/N done' messages."""
     from . import actions
     outputs: list[Path] = []
     errors: list[str] = []
@@ -94,11 +94,11 @@ def run_files(action_id: str, paths: list[Path], kwargs: dict, progress) -> tupl
                 done_count += 1
                 try:
                     outs, notes, err = f.result()
-                except BrokenProcessPool:                  # havuz kurulamadı/çöktü: bu dosya sırayla yapılır
+                except BrokenProcessPool:                  # the pool could not be created / crashed: this file is done sequentially
                     fallback.append(p)
                     done_count -= 1
                     continue
-                except Exception as e:                    # çöken alt süreç
+                except Exception as e:                    # crashed child process
                     outs, notes, err = [], [], f"{p.name}: {type(e).__name__}: {e}"
                 outputs += [Path(o) for o in outs]
                 for m in notes:
@@ -125,7 +125,7 @@ def run_files(action_id: str, paths: list[Path], kwargs: dict, progress) -> tupl
     return outputs, errors
 
 
-# ---------------------------------------------------------------- büyük PDF → Word
+# ---------------------------------------------------------------- large PDF → Word
 
 def _parse_chunk(args):
     src, pages, json_path, settings = args
@@ -136,7 +136,7 @@ def _parse_chunk(args):
     logging.getLogger().setLevel(logging.ERROR)
     from pdf2docx import Converter
     from .textfix import patched_text
-    logging.getLogger().setLevel(logging.ERROR)  # pdf2docx içe aktarılırken kendi ayarını yapıyor
+    logging.getLogger().setLevel(logging.ERROR)  # pdf2docx sets its own configuration on import
     with patched_text(src) as stats:
         cv = Converter(str(src))
         try:
@@ -156,9 +156,9 @@ def _parse_chunk(args):
 
 
 def word_parallel(src: Path, out: Path, n_pages: int, settings: dict, tmpdir: Path, progress) -> Counter:
-    """pdf2docx'in ayrıştırma adımını sayfa parçalarına bölüp çekirdeklere dağıtır, Word'ü tek yerde kurar.
-    (pdf2docx'in kendi çoklu süreç modu yamalarımızı kaybediyor, JSON'u çalışma klasörüne yazıyor ve
-    Windows'ta Türkçe karakterde okuma hatası veriyor; bu yüzden kendi sürümümüz.)"""
+    """Splits pdf2docx's parsing step into page chunks spread over the cores, builds the Word file in one place.
+    (pdf2docx's own multiprocessing mode loses our patches, writes its JSON into the working folder and
+    fails to read Turkish characters on Windows; hence our own version.)"""
     from pdf2docx import Converter
     from .textfix import patched_text
     k = workers_for(max(1, n_pages // 10))
@@ -183,7 +183,7 @@ def word_parallel(src: Path, out: Path, n_pages: int, settings: dict, tmpdir: Pa
         if not CANCEL.is_set():
             ex.shutdown(wait=True)
     progress(T("Word dosyası kuruluyor…"))
-    with patched_text(src):                      # alt simge yaması Word'ü kurarken de gerekli
+    with patched_text(src):                      # the subscript patch is also needed while building the Word file
         cv = Converter(str(src))
         try:
             for _, _, jp, _ in jobs:

@@ -1,11 +1,11 @@
-"""İmza / yazı / görsel ekleme penceresi (tkinter).
+"""Signature / text / image window (tkinter).
 
-  - ✍ İmzam: kayıtlı imzayı sayfaya koyar (ilk seferde çiz ya da fotoğraftan yükle)
-  - 🖼 Görsel: logo, kaşe, fotoğraf · T Yazı · 📅 Tarih
-  - Sürükle: taşı · sağ alt kare: büyüt/küçült · çift tık (yazı): düzenle · Del: sil
-  - Her sayfaya: seçili öğeyi her sayfaya kopyalar (logo, antet, paraf için)
-Kısayollar: PageUp/PageDown sayfa · ok tuşları kaydır · Ctrl+I imzam · Ctrl+D tarih ·
-            Ctrl+G tüm sayfalara · Ctrl+S kaydet · Ctrl+Z geri al
+  - ✍ My signature: puts the saved signature on the page (draw it or load it from a photo the first time)
+  - 🖼 Image: logo, stamp, photo · T Text · 📅 Date
+  - Drag: move · bottom-right square: resize · double-click (text): edit · Del: delete
+  - Every page: copies the selected item to every page (for a logo, letterhead, initials)
+Shortcuts: PageUp/PageDown page · arrow keys move · Ctrl+I my signature · Ctrl+D date ·
+           Ctrl+G all pages · Ctrl+S save · Ctrl+Z undo
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ HANDLE = 9
 
 
 def _color(shown: str):
-    """Menüde görünen (çevrilmiş) renk adından renk."""
+    """Colour from the (translated) colour name shown in the menu."""
     for name, rgb in COLORS.items():
         if T(name) == shown:
             return rgb
@@ -45,7 +45,7 @@ def _ui_font():
 
 
 def signature_dialog(parent):
-    """İmza çiz ya da fotoğraftan yükle. PNG baytlarını döndürür (iptal → None)."""
+    """Draw a signature or load it from a photo. Returns the PNG bytes (cancel → None)."""
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     W, H = 600, 220
@@ -137,7 +137,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     stamps: list[sm.Stamp] = []
     history: list[list] = []
     state = {"page": 0, "zoom": 1.0, "ox": 0, "oy": 0, "sel": None, "drag": None, "bg": None}
-    imgs: dict = {}                   # tk görsellerini çöp toplayıcıdan koru
+    imgs: dict = {}                   # keep tk images from the garbage collector
     saved: list[Path] = []
     sig_cache = {"png": sm.signature_path().read_bytes() if sm.signature_path().exists() else None}
 
@@ -154,7 +154,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         b.pack(side="left", padx=1)
         return b
 
-    # ------------------------------------------------------------------ koordinat
+    # ------------------------------------------------------------------ coordinates
     def page_rect():
         return doc[state["page"]].rect
 
@@ -181,7 +181,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             state["sel"] = None
             redraw()
 
-    # ------------------------------------------------------------------ çizim
+    # ------------------------------------------------------------------ drawing
     def render_page():
         cw, ch = max(canvas.winfo_width(), 200), max(canvas.winfo_height(), 200)
         r = page_rect()
@@ -317,7 +317,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             s.rect = sm.clamp(sm.text_rect(t, s.rect[:2], fs), page_rect())
             redraw()
 
-    # ------------------------------------------------------------------ sayfa
+    # ------------------------------------------------------------------ page
     def go(delta):
         p = min(max(state["page"] + delta, 0), len(doc) - 1)
         if p != state["page"]:
@@ -384,7 +384,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             s.rect = sm.clamp((x0 + dx, y0 + dy, x1 + dx, y1 + dy), page_rect())
         else:
             w = max(12.0, x1 - x0 + dx)
-            h = w / max(s.aspect, 1e-6)          # en-boy oranı korunur (yazıda punto da büyür)
+            h = w / max(s.aspect, 1e-6)          # the aspect ratio is kept (font size grows too for text)
             r = page_rect()
             w, h = min(w, r.width - x0), min(h, r.height - y0)
             s.rect = (x0, y0, x0 + w, y0 + h)
@@ -393,7 +393,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
 
     def on_release(e):
         if state["drag"] and not state["drag"][4]:
-            history.pop()                       # yalnızca tıklandı: geri al geçmişini kirletme
+            history.pop()                       # just clicked: don't pollute the undo history
         state["drag"] = None
 
     def on_double(e):
@@ -433,7 +433,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     key("<Control-d>", add_date)
     key("<Control-g>", all_pages)
 
-    # ------------------------------------------------------------------ araç çubuğu
+    # ------------------------------------------------------------------ toolbar
     btn(bar, T("✍ İmzam"), my_signature)
     btn(bar, T("Yeni imza"), new_signature)
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
@@ -448,7 +448,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     btn(bar, T("Her sayfaya"), all_pages)
     btn(bar, T("Sil"), delete)
     btn(bar, "↶", undo)
-    nav = ttk.Frame(foot)                       # sayfa gezinmesi alt çubukta: dar pencerede de görünür
+    nav = ttk.Frame(foot)                       # page navigation in the bottom bar: visible in a narrow window too
     nav.pack(side="left", padx=(0, 10))
     ttk.Button(nav, text="◀", width=3, command=lambda: go(-1), style="Tool.TButton").pack(side="left")
     pg_lbl = ttk.Label(nav, width=12, anchor="center")

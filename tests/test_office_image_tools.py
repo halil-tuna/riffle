@@ -1,4 +1,4 @@
-"""Word / Excel / PowerPoint / CSV ve görsel araçları (0.9.0)."""
+"""Word / Excel / PowerPoint / CSV and image tools (0.9.0)."""
 
 import io
 import shutil
@@ -15,7 +15,7 @@ noop = lambda m: None  # noqa: E731
 
 
 def _photo(w=2400, h=1600, seed=1):
-    """Gürültülü, fotoğraf gibi (iyi sıkışmayan) görsel."""
+    """Noisy, photo-like image (compresses poorly)."""
     import numpy as np
     from PIL import Image
     rng = np.random.default_rng(seed)
@@ -40,7 +40,7 @@ def docx_with_images(tmp_path):
     big = tmp_path / "foto.png"
     big.write_bytes(_png_bytes(_photo()))
     d.add_picture(str(big), width=Cm(12))
-    d.add_picture(str(big), width=Cm(6))             # aynı resim ikinci kez (docx tek kopya tutar ya da iki)
+    d.add_picture(str(big), width=Cm(6))             # the same image a second time (the docx keeps one copy or two)
     small = tmp_path / "logo.png"
     _photo(300, 200, seed=2).save(small)
     d.add_picture(str(small), width=Cm(3))
@@ -49,21 +49,21 @@ def docx_with_images(tmp_path):
     return p
 
 
-# ---------------------------------------------------------------- Office küçült
+# ---------------------------------------------------------------- shrink Office files
 
 def test_compress_docx_smaller_and_valid(docx_with_images):
     import docx
     out = officetools.compress_office([docx_with_images], noop)[0]
     assert out.name == "Çalışma Raporu_kucuk.docx"
     assert out.stat().st_size < docx_with_images.stat().st_size * 0.6
-    d = docx.Document(str(out))                      # açılıyor
+    d = docx.Document(str(out))                      # opens
     assert "Ödev Raporu" in d.paragraphs[0].text
-    assert len(d.inline_shapes) == 3                 # resimler yerinde
+    assert len(d.inline_shapes) == 3                 # images in place
     with zipfile.ZipFile(out) as z:
         ct = z.read("[Content_Types].xml").decode()
         media = [n for n in z.namelist() if n.startswith("word/media/")]
         rels = z.read("word/_rels/document.xml.rels").decode()
-    for m in media:                                  # her medya ilişkilerde ve içerik türlerinde tanımlı
+    for m in media:                                  # every media file is declared in the relationships and content types
         assert m.rsplit("/", 1)[1] in rels
         assert f'Extension="{m.rsplit(".", 1)[1]}"' in ct or m.rsplit(".", 1)[1] in ("png", "jpeg", "jpg")
 
@@ -94,7 +94,7 @@ def test_compress_nothing_to_do(tmp_path):
         officetools.compress_office([p], noop)
 
 
-# ---------------------------------------------------------------- Word birleştir
+# ---------------------------------------------------------------- merge Word files
 
 def test_merge_word_keeps_order_images_lists(tmp_path, docx_with_images):
     import docx
@@ -111,7 +111,7 @@ def test_merge_word_keeps_order_images_lists(tmp_path, docx_with_images):
     assert texts.index("Bölüm 2: Yöntem") < texts.index("Ödev Raporu — Giriş")
     assert len(d.inline_shapes) == 3
     xml = d.element.xml
-    assert 'w:type="page"' in xml                    # ikinci belge yeni sayfadan
+    assert 'w:type="page"' in xml                    # the second document starts on a new page
 
 
 def test_merge_word_needs_two(tmp_path, docx_with_images):
@@ -134,12 +134,12 @@ def test_csv_turkish_windows_semicolon(tmp_path):
     ws = openpyxl.load_workbook(out).active
     assert [c.value for c in ws[1]] == ["Ad Soyad", "TC Kimlik", "Telefon", "Tutar", "Tarih", "Şehir"]
     assert ws["A2"].value == "Ayşe Yılmaz" and ws["F4"].value == "Iğdır"
-    assert ws["B2"].value == "12345678901"            # TC: metin kalır (bilimsel gösterim olmasın)
-    assert ws["C2"].value == "05321234567"            # baştaki sıfır korunur
+    assert ws["B2"].value == "12345678901"            # national ID: stays text (no scientific notation)
+    assert ws["C2"].value == "05321234567"            # leading zero is kept
     assert ws["D2"].value == pytest.approx(1234.56) and ws["D3"].value == pytest.approx(12.5)
     assert ws["D4"].value == 7
     assert ws["E2"].value == datetime(2026, 11, 3)
-    assert ws["E4"].value == "29.02.2025"             # geçersiz tarih metin kalır
+    assert ws["E4"].value == "29.02.2025"             # an invalid date stays text
     assert ws.freeze_panes == "A2"
     assert any("Windows-1254" in n and "noktalı virgül" in n for n in notes)
 
@@ -155,7 +155,7 @@ def test_csv_utf8_comma_english_numbers(tmp_path):
     assert ws["C2"].value == "007" and ws["C3"].value == 42
 
 
-# ---------------------------------------------------------------- not çıktısı / resim çıkar
+# ---------------------------------------------------------------- handouts / extract images
 
 def test_handout_three_per_page(tmp_path):
     import pymupdf
@@ -168,7 +168,7 @@ def test_handout_three_per_page(tmp_path):
     out = officetools.slide_handout([src], noop)[0]
     with pymupdf.open(out) as r:
         assert len(r) == 3
-        assert r[0].rect.width < r[0].rect.height    # A4 dikey
+        assert r[0].rect.width < r[0].rect.height    # A4 portrait
         assert "Slayt 1" in r[0].get_text() and "Slayt 7" in r[2].get_text()
 
 
@@ -191,10 +191,10 @@ def test_extract_office_images_dedup(docx_with_images):
     folder = officetools.extract_office_images([docx_with_images], noop)[0]
     files = sorted(folder.iterdir())
     assert folder.name == "Çalışma Raporu_resimler"
-    assert 2 <= len(files) <= 2                       # aynı fotoğraf bir kez + logo
+    assert 2 <= len(files) <= 2                       # the same photo once + the logo
 
 
-# ---------------------------------------------------------------- görseller
+# ---------------------------------------------------------------- images
 
 def test_image_to_target(tmp_path):
     p = tmp_path / "vesikalık.png"
@@ -202,7 +202,7 @@ def test_image_to_target(tmp_path):
     notes = []
     out = imagetools.image_to_target([p], notes.append, target="200")[0]
     assert out.suffix == ".jpg" and out.stat().st_size <= 200 * 1024
-    assert out.stat().st_size > 120 * 1024            # hedefe yakın: kalite boşa harcanmadı
+    assert out.stat().st_size > 120 * 1024            # close to the target: no quality wasted
     with pytest.raises(ConversionError):
         imagetools._parse_kb("abc")
     assert imagetools._parse_kb("1.5mb") == int(1.5 * 1024 * 1024)
@@ -241,7 +241,7 @@ def test_image_text_to_txt_and_clipboard(tmp_path):
     assert clip and "Aralık" in clip[-1]
 
 
-# ---------------------------------------------------------------- güncelleme bildirimi
+# ---------------------------------------------------------------- update notice
 
 def test_update_version_compare_and_cache(monkeypatch, tmp_path):
     monkeypatch.delenv("RIFFLE_NO_UPDATE_CHECK", raising=False)
@@ -249,9 +249,9 @@ def test_update_version_compare_and_cache(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(update, "fetch", lambda timeout=4.0: calls.append(1) or "99.0.0")
     assert update.check() == "99.0.0"
-    assert update.check() == "99.0.0" and len(calls) == 1      # haftada bir: ikinci kez ağa çıkmaz
+    assert update.check() == "99.0.0" and len(calls) == 1      # once a week: doesn't go online a second time
     monkeypatch.setattr(update, "fetch", lambda timeout=4.0: "0.0.1")
-    assert update.check(force=True) is None                    # eski sürüm: bildirim yok
+    assert update.check(force=True) is None                    # older version: no notice
     assert update._ver("v0.10.0") > update._ver("0.9.9")
 
 
@@ -285,7 +285,7 @@ def test_csv_us_dates_and_western_encoding(tmp_path):
     p.write_bytes(("\n".join(rows) + "\n").encode("cp1252"))
     ws = openpyxl.load_workbook(officetools.csv_to_excel([p], noop)[0]).active
     assert ws["A3"].value == "Þór" and ws["B2"].value == "Straße 5, Köln" and ws["A4"].value == "Anaïs"
-    assert ws["C2"].value == datetime(2026, 12, 25) and ws["C3"].value == datetime(2026, 3, 11)   # ABD: ay önce
+    assert ws["C2"].value == datetime(2026, 12, 25) and ws["C3"].value == datetime(2026, 3, 11)   # US: month first
     assert ws["D2"].value == pytest.approx(1234.5)
 
 
@@ -294,19 +294,19 @@ def test_csv_ambiguous_slash_dates_stay_text(tmp_path):
     p = tmp_path / "d.csv"
     p.write_text("tarih,not\n03/11/2026,a\n04/05/2026,b\n", encoding="utf-8")
     ws = openpyxl.load_workbook(officetools.csv_to_excel([p], noop)[0]).active
-    assert ws["A2"].value == "03/11/2026"          # 3 Kasım mı 11 Mart mı belli değil: yanlış tarih üretme
+    assert ws["A2"].value == "03/11/2026"          # 3 November or 11 March is unclear: don't produce a wrong date
 
 
 @pytest.mark.skipif(not shutil.which("tesseract"), reason="Tesseract yok")
 def test_image_text_marks_unreadable_equation(tmp_path):
-    """Okunamayan denklem/şekil sessizce kaybolmaz: yerinde işaret kalır, metin sırası korunur."""
+    """An unreadable equation/figure doesn't vanish silently: a marker stays in its place, text order is kept."""
     from PIL import Image, ImageDraw, ImageFont
     from riffle.ocr import _font_file
     im = Image.new("RGB", (1400, 520), "white")
     dr = ImageDraw.Draw(im)
     f = ImageFont.truetype(_font_file(), 40)
     dr.text((60, 40), "The bending stress is given by", fill="black", font=f)
-    for k in range(5):                              # kelime olmayan çizim (formül / şekil yerine)
+    for k in range(5):                              # a drawing that is not words (in place of a formula / figure)
         dr.arc((200 + 90 * k, 150, 280 + 90 * k, 260), 200, 340, fill="black", width=5)
     dr.line((200, 205, 700, 205), fill="black", width=4)
     dr.text((60, 330), "where c is the distance from the axis.", fill="black", font=f)

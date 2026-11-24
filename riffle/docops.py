@@ -1,4 +1,4 @@
-"""Belge işlemleri: karartma (redaksiyon), iki PDF karşılaştırma, beyaz kenar kırpma."""
+"""Document operations: redaction, comparing two PDFs, trimming white margins."""
 
 from __future__ import annotations
 
@@ -42,10 +42,10 @@ PATTERNS = {
 
 
 def find_sensitive(text: str, extra: list[str] | None = None) -> list[tuple[str, str]]:
-    """[(tür, eşleşen metin)] — sayfa metninde."""
+    """[(kind, matched text)] — in the page text."""
     hits: list[tuple[str, str]] = []
     taken: list[tuple[int, int]] = []
-    for kind in ("IBAN", "TC kimlik", "telefon", "e-posta"):   # IBAN önce: içindeki rakamlar TC/telefon sanılmasın
+    for kind in ("IBAN", "TC kimlik", "telefon", "e-posta"):   # IBAN first: its digits should not be taken for an ID/phone number
         rx, ok = PATTERNS[kind]
         for m in rx.finditer(text):
             if any(a < m.end() and m.start() < b for a, b in taken):
@@ -56,7 +56,7 @@ def find_sensitive(text: str, extra: list[str] | None = None) -> list[tuple[str,
     for w in extra or []:
         w = w.strip()
         if len(w) >= 2:
-            # kelime arası boşluk PDF'te bölünmez boşluk (U+00A0) ya da satır sonu olabilir
+            # the space between words may be a non-breaking space (U+00A0) or a line break in the PDF
             pat = r"\s+".join(re.escape(x) for x in w.split())
             for m in re.finditer(pat, text, re.I):
                 hits.append(("özel", m.group(0)))
@@ -67,7 +67,7 @@ def _rects(page, needle: str):
     rects = page.search_for(needle)
     if rects:
         return rects
-    # satır kırılmasına bölünmüş eşleşme: parçaları ayrı ara
+    # match split by a line break: search for the parts separately
     out = []
     for part in re.split(r"\s+", needle):
         if len(part) >= 2:
@@ -95,9 +95,9 @@ def redact(paths, progress, words: str = "", **_):
                     if rs:
                         counts[kind] = counts.get(kind, 0) + 1
                 if hits:
-                    # metni gerçekten sil, altındaki resim piksellerini de karart
+                    # really delete the text and black out the image pixels under it as well
                     page.apply_redactions(images=2, graphics=0, text=0)
-            doc.set_metadata({})                 # yazar, program vb. bilgileri de temizle
+            doc.set_metadata({})                 # also clear author, producer etc.
             try:
                 doc.del_xml_metadata()
             except Exception:
@@ -115,7 +115,7 @@ def redact(paths, progress, words: str = "", **_):
     return outputs
 
 
-# ============================================================ karşılaştırma
+# ============================================================ comparison
 
 
 def _words(doc):
@@ -211,7 +211,7 @@ def _summary(report, old_p, new_p, deleted, inserted, changes, ratio):
         line(T("Metin farkı yok."), 11, (0, 0.45, 0))
 
 
-# ============================================================ kenar kırp
+# ============================================================ trim margins
 
 
 def autocrop(paths, progress, margin: float = 12.0, **_):
@@ -226,13 +226,13 @@ def autocrop(paths, progress, margin: float = 12.0, **_):
                 a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
                 ys, xs = np.where(a < 240)
                 if not len(xs):
-                    continue                                    # boş sayfa
+                    continue                                    # blank page
                 sx, sy = page.rect.width / pix.width, page.rect.height / pix.height
                 vis = pymupdf.Rect(xs.min() * sx - margin, ys.min() * sy - margin,
                                    (xs.max() + 1) * sx + margin, (ys.max() + 1) * sy + margin) & page.rect
                 if vis.get_area() > 0.97 * page.rect.get_area():
-                    continue                                    # kırpılacak kenar yok
-                r = vis * page.derotation_matrix                # görünen → döndürmesiz sayfa koordinatı
+                    continue                                    # no margin to trim
+                r = vis * page.derotation_matrix                # visible → unrotated page coordinates
                 r.normalize()
                 cb = page.cropbox
                 page.set_cropbox(pymupdf.Rect(cb.x0 + r.x0, cb.y0 + r.y0, cb.x0 + r.x1, cb.y0 + r.y1) & page.mediabox)
@@ -257,11 +257,11 @@ def pdf_to_markdown(paths, progress, **_):
                 try:
                     md = pymupdf4llm.to_markdown(doc, show_progress=False)
                 except (OSError, RuntimeError, ValueError):
-                    # sayfa düzeni modeli yüklenemedi (eksik/bozuk dosya): modelsiz yola düş
+                    # page layout model could not be loaded (missing/broken file): fall back to the path without it
                     pymupdf4llm.use_layout(False)
                     md = pymupdf4llm.to_markdown(doc, show_progress=False)
             except ImportError:
-                md = "\n\n".join(page.get_text() for page in doc)   # yedek: düz metin
+                md = "\n\n".join(page.get_text() for page in doc)   # fallback: plain text
             empty = sum(1 for page in doc if len(page.get_text().strip()) < 10)
         out = unique_path(p.parent, p.stem, ".md")
         out.write_text(md, encoding="utf-8")
@@ -320,7 +320,7 @@ def pdf_to_pdfa(paths, progress, **_):
         with tempfile.TemporaryDirectory(prefix="riffle_pdfa_") as tmp:
             src = Path(tmp) / "girdi.pdf"
             with open_pdf(p) as doc:
-                fix_tounicode(doc)          # Ghostscript bozuk ToUnicode'a güvenir → Türkçe harfler bozulmasın
+                fix_tounicode(doc)          # Ghostscript trusts a broken ToUnicode → keep Turkish letters intact
                 doc.save(src, garbage=1)
             icc = Path(tmp) / "srgb.icc"
             icc.write_bytes(ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes())
@@ -339,13 +339,13 @@ def pdf_to_pdfa(paths, progress, **_):
     return outputs
 
 
-# ============================================================ yazdırma: çoklu sayfa, kitapçık, gri
+# ============================================================ printing: n-up, booklet, grey
 
 A4 = (595.276, 841.89)
 
 
 def _best_grid(n: int, aspect: float):
-    """n kaynak sayfayı A4'e en büyük ölçekle dizen (satır, sütun, yatay mı) seçimi."""
+    """Choice of (rows, columns, landscape?) that lays out n source pages on A4 at the largest scale."""
     best = None
     grids = {(r, n // r) for r in range(1, n + 1) if n % r == 0}
     for rows, cols in grids:
@@ -354,14 +354,14 @@ def _best_grid(n: int, aspect: float):
             m, gap = 18, 8
             cw = (W - 2 * m - (cols - 1) * gap) / cols
             ch = (H - 2 * m - (rows - 1) * gap) / rows
-            scale = min(cw / aspect, ch)            # kaynak: genişlik/yükseklik = aspect, yükseklik = 1
+            scale = min(cw / aspect, ch)            # source: width/height = aspect, height = 1
             if best is None or scale > best[0] + 1e-6:
                 best = (scale, rows, cols, land)
     return best[1:]
 
 
 def _unrotated(src):
-    """Döndürülmüş sayfaları görünen hâliyle sabitleyen kopya (show_pdf_page /Rotate'i yok sayıyor)."""
+    """Copy that fixes rotated pages as they appear (show_pdf_page ignores /Rotate)."""
     if not any(pg.rotation for pg in src):
         return src
     cp = pymupdf.open()
@@ -385,7 +385,7 @@ def n_up(paths, progress, per: int = 4, frame: bool = True, **_):
             m, gap = 18, 8
             cw = (W - 2 * m - (cols - 1) * gap) / cols
             ch = (H - 2 * m - (rows - 1) * gap) / rows
-            # hücreyi sayfanın gerçek oranına sıkıştır, ızgarayı kâğıtta ortala (aralar boş kalmasın)
+            # shrink the cell to the page's real aspect, centre the grid on the paper (no gaps in between)
             s = min(cw / aspect, ch)
             cw, ch = aspect * s, s
             ox = (W - cols * cw - (cols - 1) * gap) / 2
@@ -418,15 +418,15 @@ def n_up(paths, progress, per: int = 4, frame: bool = True, **_):
 
 
 def booklet_order(n: int) -> list[tuple]:
-    """Kitapçık: her kâğıt yüzü (sol, sağ) sayfa dizinleri; None = boş. Kısa kenardan çevirerek
-    çift taraflı bas, ortadan katla."""
+    """Booklet: page indexes for each side of a sheet (left, right); None = blank. Print double-sided,
+    flip on the short edge, fold in the middle."""
     total = -(-n // 4) * 4
     pages = list(range(n)) + [None] * (total - n)
     sides = []
     lo, hi = 0, total - 1
     while lo < hi:
-        sides.append((pages[hi], pages[lo]))          # ön yüz: son | ilk
-        sides.append((pages[lo + 1], pages[hi - 1]))  # arka yüz: ikinci | sondan ikinci
+        sides.append((pages[hi], pages[lo]))          # front side: last | first
+        sides.append((pages[lo + 1], pages[hi - 1]))  # back side: second | second to last
         lo, hi = lo + 2, hi - 2
     return sides
 
@@ -438,7 +438,7 @@ def booklet(paths, progress, **_):
             src = _unrotated(orig)
             n = len(src)
             out = pymupdf.open()
-            W, H = A4[1], A4[0]                        # yatay A4, iki A5 yarım
+            W, H = A4[1], A4[0]                        # landscape A4, two A5 halves
             m = 14
             for i, (left, right) in enumerate(booklet_order(n)):
                 progress(T("{0}: kâğıt yüzü {1}", p.name, i + 1))
@@ -465,7 +465,7 @@ def grayscale(paths, progress, **_):
         with open_pdf(p) as doc:
             before = p.stat().st_size
             try:
-                doc.recolor(1)                         # yazı, çizim ve resimler gri; metin seçilebilir kalır
+                doc.recolor(1)                         # text, drawings and images grey; text stays selectable
             except Exception as e:
                 raise ConversionError(T("{0}: gri tonlamaya çevrilemedi ({1}).", p.name, e))
             o = unique_path(p.parent, f"{p.stem}_siyah_beyaz", ".pdf")
@@ -475,7 +475,7 @@ def grayscale(paths, progress, **_):
     return outputs
 
 
-# ============================================================ tarama düzeltme
+# ============================================================ scan cleanup
 
 def _gray_small(page, dpi=60):
     import numpy as np
@@ -484,23 +484,23 @@ def _gray_small(page, dpi=60):
 
 
 def is_blank(page, ink_ratio: float = 0.0015) -> bool:
-    """Boş sayfa mı? Metin yok ve koyu piksel oranı çok düşük (tarayıcı lekesi, arka yüz gölgesi sayılmaz)."""
+    """Is the page blank? No text and a very low share of dark pixels (scanner specks, back-side shadow don't count)."""
     if page.get_text().strip():
         return False
     a = _gray_small(page, 50)
     h, w = a.shape
-    core = a[int(h * 0.04):int(h * 0.96), int(w * 0.04):int(w * 0.96)]   # kenardaki tarayıcı gölgesi hariç
+    core = a[int(h * 0.04):int(h * 0.96), int(w * 0.04):int(w * 0.96)]   # excluding the scanner shadow at the edges
     return float((core < 128).mean()) < ink_ratio
 
 
 def skew_angle(page, max_deg: float = 8.0) -> float:
-    """Taranmış sayfanın eğikliği (derece): içeriği bu açıyla (saat yönünün tersine +) döndürünce düzelir.
-    Satır izdüşümü yöntemi: doğru açıda satırlar yatay hizalanır, satır toplamlarının varyansı en büyük olur."""
+    """Skew of a scanned page (degrees): rotating the content by this angle (counter-clockwise +) straightens it.
+    Projection profile method: at the right angle lines are horizontal and the variance of the row sums is largest."""
     import numpy as np
     from PIL import Image
     a = _gray_small(page, 72)
     ink = (a < min(160, int(a.mean()) - 25)).astype(np.uint8) * 255
-    if ink.mean() < 0.5:                     # neredeyse boş
+    if ink.mean() < 0.5:                     # almost empty
         return 0.0
     im = Image.fromarray(ink)
 
@@ -515,7 +515,7 @@ def skew_angle(page, max_deg: float = 8.0) -> float:
 
 
 def _rotate_content(doc, page, deg: float) -> None:
-    """Sayfa içeriğini merkez etrafında döndürür (kayıpsız: resim yeniden sıkıştırılmaz, metin kalır)."""
+    """Rotates the page content around its centre (lossless: the image is not recompressed, text stays)."""
     import math
     page.clean_contents()
     xrefs = page.get_contents()
@@ -532,7 +532,7 @@ def _rotate_content(doc, page, deg: float) -> None:
 
 
 def fix_scan(paths, progress, **_):
-    """Taranmış PDF: eğik sayfaları düzelt, boş sayfaları (arka yüzler) sil."""
+    """Scanned PDF: straighten skewed pages, remove blank pages (back sides)."""
     from .ocr import needs_ocr
     outputs = []
     for p in paths:
@@ -556,7 +556,7 @@ def fix_scan(paths, progress, **_):
             if blanks and len(blanks) < len(doc):
                 doc.delete_pages(blanks)
             elif blanks:
-                blanks = []                      # hepsi boşsa hiçbirini silme
+                blanks = []                      # if all are blank, delete none
             if not fixed and not blanks:
                 progress(T("ℹ {0}: eğik ya da boş sayfa bulunamadı, dosya değiştirilmedi.", p.name))
                 continue
@@ -590,11 +590,11 @@ def remove_blank_pages(paths, progress, **_):
     return outputs
 
 
-# ============================================================ resimleri çıkar
+# ============================================================ extract images
 
 def extract_images(paths, progress, min_side: int = 48, **_):
-    """PDF'teki gömülü resimleri ORİJİNAL hâliyle (yeniden sıkıştırmadan) klasöre çıkarır.
-    Aynı resim birden çok sayfada geçiyorsa bir kez; çok küçük süsler (ikon, çizgi) atlanır."""
+    """Extracts the images embedded in the PDF to a folder in their ORIGINAL form (no recompression).
+    An image used on several pages is saved once; tiny decorations (icons, lines) are skipped."""
     from .actions import unique_dir
     outputs = []
     for p in paths:
@@ -616,8 +616,8 @@ def extract_images(paths, progress, min_side: int = 48, **_):
                     if not info or min(info["width"], info["height"]) < min_side:
                         skipped += 1
                         continue
-                    # aynı resim belgede ayrı ayrı nesneler olarak tekrar tekrar gömülmüş olabilir
-                    # (Word her sayfaya logo/şekil kopyası koyuyor): baytına ve piksellerine göre bir kez
+                    # the same image may be embedded again and again as separate objects
+                    # (Word puts a copy of the logo/shape on every page): once by bytes and pixels
                     keys = {hashlib.md5(info["image"]).hexdigest()}
                     try:
                         keys.add(pymupdf.Pixmap(doc, xref).digest.hex())
@@ -631,7 +631,7 @@ def extract_images(paths, progress, min_side: int = 48, **_):
                         folder = unique_dir(p.parent, f"{p.stem}_resimler")
                     name = T("sayfa{0:03d}_{1}", pno + 1, k)
                     try:
-                        if smask:                       # saydamlık maskesi: PNG olarak birleştir
+                        if smask:                       # transparency mask: combine as PNG
                             pix = pymupdf.Pixmap(doc.extract_image(xref)["image"])
                             mask = pymupdf.Pixmap(doc.extract_image(smask)["image"])
                             if pix.alpha:
@@ -643,14 +643,14 @@ def extract_images(paths, progress, min_side: int = 48, **_):
                         elif info["ext"] in ("jpeg", "jpg", "png", "jpx", "jp2", "bmp", "tiff", "gif"):
                             ext = {"jpeg": "jpg", "jpx": "jp2"}.get(info["ext"], info["ext"])
                             (folder / f"{name}.{ext}").write_bytes(info["image"])
-                        else:                           # JBIG2/CCITT gibi: PNG'ye çevir
+                        else:                           # JBIG2/CCITT etc.: convert to PNG
                             pix = pymupdf.Pixmap(doc, xref)
                             if pix.n - pix.alpha >= 4:
                                 pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
                             pix.save(folder / f"{name}.png")
                         saved += 1
                     except Exception:
-                        try:                            # son çare: resmi PNG'ye render et
+                        try:                            # last resort: render the image to PNG
                             pix = pymupdf.Pixmap(doc, xref)
                             if pix.n - pix.alpha >= 4:
                                 pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
@@ -669,11 +669,11 @@ def extract_images(paths, progress, min_side: int = 48, **_):
     return outputs
 
 
-# ============================================================ bütün sayfaları A4 yap
+# ============================================================ make all pages A4
 
 def to_a4(paths: list[Path], progress, **_) -> list[Path]:
-    """Farklı boyutlu sayfalar (A5, Letter, telefon taraması, slayt) tek tip A4'e: içerik oranı korunarak
-    sığdırılır ve ortalanır; yatay sayfalar yatay A4 olur. Metin ve çizimler vektör kalır."""
+    """Pages of different sizes (A5, Letter, phone scans, slides) to uniform A4: the content is fitted keeping
+    its aspect ratio and centred; landscape pages become landscape A4. Text and drawings stay vector."""
     from .actions import open_pdf
     W, H = pymupdf.paper_size("a4")
     outputs = []
@@ -683,7 +683,7 @@ def to_a4(paths: list[Path], progress, **_) -> list[Path]:
             for i, page in enumerate(src):
                 if i % 20 == 0:
                     progress(T("{0}: sayfa {1}/{2}", p.name, i + 1, len(src)))
-                r = page.rect                                    # görünen (döndürülmüş) boyut
+                r = page.rect                                    # visible (rotated) size
                 land = r.width > r.height
                 pw, ph = (H, W) if land else (W, H)
                 if abs(r.width - pw) > 3 or abs(r.height - ph) > 3:
@@ -703,7 +703,7 @@ def to_a4(paths: list[Path], progress, **_) -> list[Path]:
     return outputs
 
 
-# ============================================================ boyuta göre böl
+# ============================================================ split by size
 
 def _pdf_bytes(src, pages: list[int]) -> bytes:
     with pymupdf.open() as d:
@@ -713,7 +713,7 @@ def _pdf_bytes(src, pages: list[int]) -> bytes:
 
 
 def split_by_size(paths: list[Path], progress, size: str = "10", **_) -> list[Path]:
-    """PDF'i her biri en fazla N MB olan parçalara böler (e-posta eki / yükleme sınırı). Sayfa sırası korunur."""
+    """Splits the PDF into parts of at most N MB each (e-mail attachment / upload limit). Page order is kept."""
     from .actions import open_pdf, unique_dir
     from .tools import _parse_mb
     limit = int(_parse_mb(size) * 1024 * 1024)
@@ -725,7 +725,7 @@ def split_by_size(paths: list[Path], progress, size: str = "10", **_) -> list[Pa
         with open_pdf(p) as src:
             n = len(src)
             progress(T("{0}: sayfa boyutları ölçülüyor", p.name))
-            # tek tek sayfa boyutu (paylaşılan yazı tipleri her sayfada sayıldığı için fazla tahmin: güvenli)
+            # size of each page alone (an overestimate since shared fonts are counted on every page: safe)
             est = []
             for i in range(n):
                 if i % 10 == 0:
@@ -740,7 +740,7 @@ def split_by_size(paths: list[Path], progress, size: str = "10", **_) -> list[Pa
                 cur_size += s
             if cur:
                 chunks.append(cur)
-            # tahmin fazla olduğundan parçalar sınırın epey altında kalabilir: komşuları gerçek boyutla birleştir
+            # the estimate is high, so parts may end up well under the limit: merge neighbours using the real size
             merged = [chunks[0]]
             for c in chunks[1:]:
                 trial = merged[-1] + c

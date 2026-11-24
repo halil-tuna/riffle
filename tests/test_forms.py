@@ -35,7 +35,7 @@ def make_form(path):
     _text(p, (216, 290), "4.")
     _text(p, (50, 330), "Kimlik:")
     add(pymupdf.PDF_WIDGET_TYPE_TEXT, "kimlik", (150, 318, 450, 336), field_flags=pymupdf.PDF_FIELD_IS_READ_ONLY)
-    # gerçek formlardaki gibi her radyo seçeneğinin kendi "açık" durumu olsun (PyMuPDF ikisine de /None veriyor)
+    # as in real forms, every radio option has its own "on" state (PyMuPDF gives both /None)
     for k, w in enumerate(x for x in p.widgets() if x.field_type == pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON):
         ap = d.xref_get_key(w.xref, "AP/N")[1]
         d.xref_set_key(w.xref, "AP/N", ap.replace("/None", f"/Secim{k + 1}"))
@@ -67,7 +67,7 @@ def test_fill(tmp_path, flatten):
     d = pymupdf.open(out)
     text = d[0].get_text()
     if flatten:
-        assert not list(d[0].widgets() or [])                  # alan kalmadı
+        assert not list(d[0].widgets() or [])                  # no fields left
         assert "Halil Tuna Ğüşıöç İŞ" in text and "İkinci satır" in text
     else:
         vals = {}
@@ -76,7 +76,7 @@ def test_fill(tmp_path, flatten):
         assert vals["ad"] == ["Halil Tuna Ğüşıöç İŞ"] and vals["bolum"] == ["Mekatronik"]
         assert vals["burs"][0] not in ("Off", "", False)
         assert vals["sinif"][0] in ("Off", False) and vals["sinif"][1] not in ("Off", False)
-        f = {x.name: x for x in forms.read_fields(d)}           # geri okununca aynı değerler
+        f = {x.name: x for x in forms.read_fields(d)}           # the same values when read back
         assert f["sinif"].value == "1" and f["burs"].value is True
 
 

@@ -1,4 +1,4 @@
-"""Görsel araçları: görseldeki yazıyı çıkar (OCR), hedef boyuta indir, PNG'ye çevir, döndür."""
+"""Image tools: extract text from an image (OCR), shrink to a target size, convert to PNG, rotate."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 from .actions import ConversionError, Progress, human_size, unique_path
 from .i18n import T
 
-CLIPBOARD = "\x00clip:"    # ilerleme penceresine: bu metni panoya kopyala (ekranda gösterilmez)
+CLIPBOARD = "\x00clip:"    # to the progress window: copy this text to the clipboard (not shown on screen)
 
 
 def _open(p: Path):
@@ -17,13 +17,13 @@ def _open(p: Path):
     return _open_image(p)
 
 
-# ============================================================ görseldeki yazı
+# ============================================================ text in images
 
 MARK = T("[denklem / şekil — okunamadı]")
 
 
 def _ink_bands(gray, min_ink: int = 3) -> list[tuple[int, int]]:
-    """Görüntüde mürekkep olan yatay şeritler (piksel satır aralıkları)."""
+    """Horizontal bands of the image that contain ink (ranges of pixel rows)."""
     import numpy as np
     a = np.asarray(gray, dtype=np.uint8)
     ink = (a < 140).sum(axis=1)
@@ -37,7 +37,7 @@ def _ink_bands(gray, min_ink: int = 3) -> list[tuple[int, int]]:
             start = None
     if start is not None:
         bands.append((start, len(rows)))
-    # aynı satırın kopuk parçaları (i noktası, alt simge) birleşsin
+    # join broken pieces of the same line (dot of an i, subscripts)
     merged = []
     for b in bands:
         if merged and b[0] - merged[-1][1] <= 3:
@@ -48,23 +48,23 @@ def _ink_bands(gray, min_ink: int = 3) -> list[tuple[int, int]]:
 
 
 def _fix_symbols(text: str) -> str:
-    # matematikte ε'yi Tesseract € okuyor; para birimi (€5, € 10) dokunulmaz
+    # in maths Tesseract reads ε as €; currency (€5, € 10) is left alone
     return re.sub(r"€(?=[A-Za-z])", "ε", text)
 
 
 def _text_from_words(words, gray=None, scale: float = 1.0) -> str:
-    """OCR kelimelerini okuma sırasıyla satır ve paragraflara diz.
+    """Arrange OCR words into lines and paragraphs in reading order.
 
-    Denklemler, kesirler ve şekiller Tesseract'ın işi değil: ya hiç okunmuyor ya çöp çıkıyor. Görüntü
-    (gray) verilirse bunlar sessizce kaybolmasın diye yerlerine işaret konur: mürekkebi olup kelimesi
-    olmayan şeritler ve güveni düşük kısa satırlar."""
+    Equations, fractions and figures are not Tesseract's job: they are either not read at all or come out as
+    garbage. If the image (gray) is given, a marker is put in their place so they don't vanish silently: bands
+    with ink but no words, and short lines with low confidence."""
     from .ocr import _clean
     lines: dict[tuple, list] = {}
     for w in _clean(words):
         if w.conf < 30:
             continue
         lines.setdefault(w.line_key, []).append(w)
-    items = []      # (y_px, tür, içerik, paragraf anahtarı)
+    items = []      # (y_px, kind, content, paragraph key)
     for key, ws in lines.items():
         ws.sort(key=lambda w: w.rect.x0)
         y0 = min(w.rect.y0 for w in ws) / scale
@@ -78,7 +78,7 @@ def _text_from_words(words, gray=None, scale: float = 1.0) -> str:
     if gray is not None:
         for b0, b1 in _ink_bands(gray):
             if b1 - b0 < 0.5 * line_h:
-                continue                                   # çizgi, gürültü
+                continue                                   # line, noise
             covered = any(it[4][0] - 3 <= (b0 + b1) / 2 <= it[4][1] + 3 or b0 <= (it[4][0] + it[4][1]) / 2 <= b1
                           for it in items)
             if not covered:
@@ -91,7 +91,7 @@ def _text_from_words(words, gray=None, scale: float = 1.0) -> str:
                 out.append(MARK)
             prev_kind, prev_par, prev_box = "mark", None, box
             continue
-        # paragraf arası: satırlar arasında boşluk varsa (Tesseract her satırı ayrı paragraf sayabiliyor)
+        # paragraph break: if there is a gap between lines (Tesseract may treat every line as its own paragraph)
         if prev_kind == "text" and (box[0] - prev_box[1] > 0.9 * line_h if gray is not None else par != prev_par):
             out.append("")
         out.append(_fix_symbols(text))
@@ -101,7 +101,7 @@ def _text_from_words(words, gray=None, scale: float = 1.0) -> str:
 
 
 def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
-    """Ekran görüntüsü, slayt, tahta fotoğrafı → metin (.txt) + panoya kopya."""
+    """Screenshot, slide, whiteboard photo → text (.txt) + copy to the clipboard."""
     import pymupdf
     from . import ocr
     ocr.require()
@@ -109,14 +109,14 @@ def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
     for p in paths:
         progress(T("Yazı okunuyor: {0}", p.name))
         im = _open(p)
-        # küçük ekran görüntülerinde Tesseract harfleri kaçırıyor: kısa kenarı en az ~1500 px
+        # Tesseract misses letters in small screenshots: short side at least ~1500 px
         if min(im.size) < 1200:
             k = 1500 / min(im.size)
             im = im.resize((int(im.width * k), int(im.height * k)))
         buf = io.BytesIO()
         im.save(buf, "PNG")
         with pymupdf.open() as doc:
-            # sayfa boyu = piksel × 72 / OCR_DPI: OCR görüntüyü kendi çözünürlüğünde okur (büyütmeden)
+            # page size = pixels × 72 / OCR_DPI: OCR reads the image at its own resolution (no upscaling)
             k = 72 / ocr.OCR_DPI
             page = doc.new_page(width=im.width * k, height=im.height * k)
             page.insert_image(page.rect, stream=buf.getvalue())
@@ -140,7 +140,7 @@ def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
     return outputs
 
 
-# ============================================================ hedef boyuta indir
+# ============================================================ shrink to target size
 
 def _parse_kb(target: str) -> int:
     s = str(target).strip().lower().replace(",", ".").replace(" ", "")
@@ -162,7 +162,7 @@ def _jpeg(im, q: int) -> bytes:
 
 
 def image_to_target(paths: list[Path], progress: Progress, target: str = "200", **_) -> list[Path]:
-    """En yüksek kalitede, hedefin altında JPEG: önce kalite, gerekirse boyut küçültülür."""
+    """JPEG under the target at the highest quality: quality first, then the size is reduced if needed."""
     limit = _parse_kb(target)
     outputs = []
     for p in paths:
@@ -172,7 +172,7 @@ def image_to_target(paths: list[Path], progress: Progress, target: str = "200", 
         best = None
         for _round in range(14):
             lo, hi, found = 40, 92, None
-            while lo <= hi:                       # bu boyutta hedefin altındaki en yüksek kalite
+            while lo <= hi:                       # highest quality under the target at this size
                 q = (lo + hi) // 2
                 data = _jpeg(im, q)
                 if len(data) <= limit:
@@ -193,7 +193,7 @@ def image_to_target(paths: list[Path], progress: Progress, target: str = "200", 
     return outputs
 
 
-# ============================================================ PNG / döndür
+# ============================================================ PNG / rotate
 
 def images_to_png(paths: list[Path], progress: Progress, **_) -> list[Path]:
     from PIL import Image, ImageOps
@@ -203,7 +203,7 @@ def images_to_png(paths: list[Path], progress: Progress, **_) -> list[Path]:
         if p.suffix.lower() in (".heic", ".heif"):
             im = _open(p)
         else:
-            im = ImageOps.exif_transpose(Image.open(p))   # saydamlık korunsun
+            im = ImageOps.exif_transpose(Image.open(p))   # keep the transparency
         out = unique_path(p.parent, p.stem, ".png")
         im.save(out, "PNG", optimize=True)
         outputs.append(out)
@@ -211,7 +211,7 @@ def images_to_png(paths: list[Path], progress: Progress, **_) -> list[Path]:
 
 
 def rotate_images(paths: list[Path], progress: Progress, angle: int = 90, **_) -> list[Path]:
-    """angle: saat yönünde derece. Biçim korunur (HEIC → JPG)."""
+    """angle: degrees clockwise. The format is kept (HEIC → JPG)."""
     from PIL import Image, ImageOps
     outputs = []
     for p in paths:

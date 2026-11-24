@@ -1,4 +1,4 @@
-"""Test dosyaları: hepsi sentetik, çalışma anında üretilir (kişisel veri yok)."""
+"""Test files: all synthetic, generated at run time (no personal data)."""
 
 from __future__ import annotations
 
@@ -17,14 +17,14 @@ import pymupdf  # noqa: E402
 
 from riffle.ocr import _font_file  # noqa: E402
 
-# sıralama penceresi otomatik testlerde açılmasın (test_ui.py kendisi açar)
+# the order window should not open in automated tests (test_ui.py opens it itself)
 os.environ.setdefault("RIFFLE_ORDER", "name")
-# ayar/kullanım dosyaları ve menü yenileme gerçek kullanıcı klasörüne dokunmasın
+# settings/usage files and menu refreshes must not touch the real user folder
 import tempfile as _tf  # noqa: E402
 os.environ.setdefault("XDG_CONFIG_HOME", _tf.mkdtemp(prefix="riffle_test_cfg_"))
 os.environ.setdefault("RIFFLE_NO_MENU_REFRESH", "1")
-os.environ.setdefault("RIFFLE_NO_UPDATE_CHECK", "1")   # testler ağa çıkmasın
-os.environ.setdefault("RIFFLE_LANG", "tr")             # beklenen metinler Türkçe (İngilizce ayrı testlerde)
+os.environ.setdefault("RIFFLE_NO_UPDATE_CHECK", "1")   # tests must not go online
+os.environ.setdefault("RIFFLE_LANG", "tr")             # expected strings are Turkish (English in separate tests)
 
 FONT = _font_file()
 TR_TEXT = "Çalışma güçlü şişe ığdır ÖĞÜŞİ"
@@ -80,7 +80,7 @@ def make_scanned(src: Path, dst: Path) -> Path:
 
 @pytest.fixture
 def work(tmp_path) -> Path:
-    """Her test kendi klasöründe; Türkçe ve boşluklu klasör adı bilerek seçildi."""
+    """Every test in its own folder; a Turkish folder name with spaces is chosen on purpose."""
     d = tmp_path / "Çalışma Klasörü"
     d.mkdir()
     return d
@@ -108,7 +108,7 @@ def encrypted(work, pdf) -> Path:
 def corrupted(work, pdf) -> Path:
     out = work / "bozuk.pdf"
     data = pdf.read_bytes()
-    out.write_bytes(data[: int(len(data) * 0.85)])   # sonu (xref) kesik
+    out.write_bytes(data[: int(len(data) * 0.85)])   # end (xref) truncated
     return out
 
 
@@ -121,7 +121,7 @@ def garbage(work) -> Path:
 
 @pytest.fixture
 def cropped(work, pdf) -> Path:
-    """Büyük tuvalden kırpılmış sayfa (dergi PDF'lerindeki gibi)."""
+    """Page cropped from a large canvas (as in magazine PDFs)."""
     out = work / "kirpilmis.pdf"
     d = pymupdf.open()
     big = d.new_page(width=842, height=1191)
@@ -198,7 +198,7 @@ def noop(_msg):
 
 
 def camera_corners(W=3200, H=2400, tilt_x=28, tilt_y=12, rot_z=6, dist=520.0, f=2900.0):
-    """Gerçek iğne deliği kamera: masadaki A4 kâğıdın (210x297 mm) fotoğraftaki köşeleri."""
+    """Real pinhole camera: the corners of an A4 sheet (210x297 mm) on a desk in the photo."""
     import numpy as np
     w, h = 210.0, 297.0
     pts = np.array([[-w / 2, -h / 2, 0], [w / 2, -h / 2, 0], [w / 2, h / 2, 0], [-w / 2, h / 2, 0]])
@@ -236,7 +236,7 @@ def make_photo(path: Path, desk=(40, 70, 110), corners=None, light=True, size=(3
         yy, xx = np.mgrid[0:H, 0:W]
         g = 0.55 + 0.45 * (xx / W) * (1 - yy / H * 0.6)
         photo = np.clip(photo * g[..., None], 0, 255).astype(np.uint8)
-    # cv2.imwrite Windows'ta Türkçe harfli yolu açamıyor: kodla, dosyaya numpy yazsın
+    # cv2.imwrite can't open a path with Turkish letters on Windows: encode, let numpy write the file
     ok, buf = cv2.imencode(".jpg", cv2.GaussianBlur(photo, (3, 3), 0), [cv2.IMWRITE_JPEG_QUALITY, 85])
     buf.tofile(str(path))
     src_pdf.unlink()

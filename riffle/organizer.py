@@ -1,13 +1,13 @@
-"""Sayfa düzenleyici penceresi (tkinter).
+"""Page organizer window (tkinter).
 
-Seçilen PDF / görsel / Office dosyalarının tüm sayfaları küçük resim olarak gelir:
-  - sürükle-bırak ile sırala, Ctrl/Shift ile çoklu seç
-  - döndür, sil, çoğalt, boş sayfa / dosya ekle
-  - ✂ böl işareti: kaydederken o noktadan ayrı PDF başlar
-  - Kaydet: tek PDF (ya da böl işaretlerine göre birden çok PDF), kaynağın yanına
+All pages of the selected PDF / image / Office files appear as thumbnails:
+  - reorder with drag and drop, multi-select with Ctrl/Shift
+  - rotate, delete, duplicate, add a blank page / file
+  - ✂ split mark: a separate PDF starts at that point when saving
+  - Save: one PDF (or several PDFs by the split marks), next to the source
 
-Kısayollar: Ctrl+A tümü · Del sil · Ctrl+R sağa · Ctrl+L sola · Ctrl+D çoğalt ·
-            Ctrl+B böl · Ctrl+Z geri al · Ctrl+←/→ taşı · Ctrl+S kaydet
+Shortcuts: Ctrl+A all · Del delete · Ctrl+R right · Ctrl+L left · Ctrl+D duplicate ·
+           Ctrl+B split · Ctrl+Z undo · Ctrl+←/→ move · Ctrl+S save
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from .i18n import T
 
 CELL_W, CELL_H, THUMB = 168, 214, 150
 PAD = 14
-SEL = "#2f60d8"     # seçim (açık ve koyu temada aynı)
-SPLIT = "#d9480f"   # bölme işareti (simgedeki turuncu)
+SEL = "#2f60d8"     # selection (same in light and dark theme)
+SPLIT = "#d9480f"   # split mark (the orange from the icon)
 
 
 def run(paths: list[Path], progress=print) -> list[Path]:
@@ -34,7 +34,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     from tkinter import filedialog, messagebox, ttk
 
     doc = Document()
-    try:                                   # Gezgin'den sürükle-bırak (isteğe bağlı paket)
+    try:                                   # drag and drop from Explorer (optional package)
         from tkinterdnd2 import DND_FILES, TkinterDnD
         root = TkinterDnD.Tk()
     except Exception:
@@ -48,13 +48,13 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     fam = theme.ui_family(root)
 
     saved: list[Path] = []
-    sel: set[int] = set()          # seçili sayfa dizinleri
-    anchor = [None]                # Shift ile aralık seçimi için
+    sel: set[int] = set()          # selected page indexes
+    anchor = [None]                # for range selection with Shift
     images: dict = {}              # (uid, rot) → PhotoImage
     pending: set = set()
     q: queue.Queue = queue.Queue()
 
-    # ------------------------------------------------------------------ düzen
+    # ------------------------------------------------------------------ layout
     bar = ttk.Frame(root, padding=(8, 6))
     bar.pack(fill="x")
     body = ttk.Frame(root)
@@ -75,7 +75,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         b.pack(side="left", padx=1)
         return b
 
-    # ------------------------------------------------------------------ yardımcılar
+    # ------------------------------------------------------------------ helpers
     def cols() -> int:
         return max(1, (canvas.winfo_width() - PAD) // (CELL_W + PAD))
 
@@ -93,7 +93,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         return i if i < len(doc.pages) else None
 
     def gap_at(x, y) -> int:
-        """Bırakma konumu: iki küçük resim arasındaki boşluğun dizini (0..n)."""
+        """Drop position: index of the gap between two thumbnails (0..n)."""
         c = cols()
         row = max(0, int((y - PAD) // (CELL_H + PAD)))
         col = round((x - PAD) / (CELL_W + PAD))
@@ -128,7 +128,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             redraw()
         root.after(60, poll)
 
-    # ------------------------------------------------------------------ çizim
+    # ------------------------------------------------------------------ drawing
     drag = {"start": None, "active": False, "gap": None}
 
     def redraw(*_):
@@ -172,7 +172,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
                          + (T(" · {0} ayrı PDF olarak kaydedilecek", parts) if parts > 1 else "")
                          + T("  ·  sürükle → sırala, sağ tık → işlemler"))
 
-    # ------------------------------------------------------------------ işlemler
+    # ------------------------------------------------------------------ operations
     def selected():
         return sorted(sel) if sel else []
 
@@ -264,7 +264,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             from .ui import open_folder as of
             of(saved[-1])
 
-    # ------------------------------------------------------------------ araç çubuğu
+    # ------------------------------------------------------------------ toolbar
     btn(T("↶ Geri al"), undo)
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
     btn(T("＋ Dosya"), add_files)
@@ -278,7 +278,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
     btn("A→Z", lambda: (doc.sort_by_name(), after_change()))
     btn(T("Ters sıra"), lambda: (doc.reverse(), after_change()))
-    # alt çubuk: durum solda; kaydetme ve ayar sağda (pencere daralsa da görünür kalır)
+    # bottom bar: status on the left; save and settings on the right (stay visible when the window narrows)
     save_btn = ttk.Button(foot, text=T("Kaydet"), command=save, style="Accent.TButton", width=12)
     save_btn.pack(side="right", padx=(6, 0))
     open_btn = ttk.Button(foot, text=T("Klasörü aç"), command=open_folder, state="disabled", style="Tool.TButton")
@@ -325,7 +325,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             drag["active"] = True
         if drag["active"]:
             drag["gap"] = gap_at(e.x, y)
-            # kenara yaklaşınca kaydır
+            # scroll when close to the edge
             if e.y < 30:
                 canvas.yview_scroll(-1, "units")
             elif e.y > canvas.winfo_height() - 30:
@@ -376,7 +376,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         else:
             canvas.yview_scroll(int(-e.delta / 40), "units")
 
-    # ------------------------------------------------------------------ büyük önizleme
+    # ------------------------------------------------------------------ large preview
     def preview(i):
         if i is None or not 0 <= i < len(doc.pages):
             return
@@ -444,12 +444,12 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     menu.insert_command(0, label=T("Büyük önizle"), command=lambda: preview(min(sel) if sel else None))
     menu.insert_separator(1)
 
-    # ------------------------------------------------------------------ Gezgin'den bırak
+    # ------------------------------------------------------------------ drop from Explorer
     if DND_FILES:
         def on_drop(e):
             files = []
             for f in map(Path, root.tk.splitlist(e.data)):
-                if f.is_dir():                 # klasör bırakılırsa içindeki dosyalar ad sırasıyla
+                if f.is_dir():                 # if a folder is dropped, the files inside in name order
                     from .actions import sorted_by_name
                     files += sorted_by_name([x for x in f.rglob("*") if x.is_file()
                                              and not x.name.startswith((".", "~$"))])
@@ -489,14 +489,14 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     key("<Control-Right>", lambda: move_by(1))
     key("<Escape>", lambda: (sel.clear(), redraw()))
 
-    # ------------------------------------------------------------------ başlat
+    # ------------------------------------------------------------------ start
     def start():
         add(paths)
         sel.clear()
         redraw()
     root.after(50, start)
     root.after(60, poll)
-    auto = os.environ.get("RIFFLE_AUTOCLOSE_MS")        # testler için
+    auto = os.environ.get("RIFFLE_AUTOCLOSE_MS")        # for tests
     if auto:
         root.after(int(auto), root.destroy)
     root.mainloop()

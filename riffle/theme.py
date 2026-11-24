@@ -1,9 +1,9 @@
-"""Ortak görünüm: Windows 11 tarzı tema (Sun Valley, sv-ttk), sistemle uyumlu açık/koyu mod,
-ortak renkler, yazı tipleri, pencere simgesi ve Windows'ta koyu başlık çubuğu.
+"""Shared look: Windows 11 style theme (Sun Valley, sv-ttk), light/dark mode that follows the system,
+shared colours, fonts, the window icon and a dark title bar on Windows.
 
-Her pencere açılırken `pal = theme.setup(root)` çağırır; klasik tk parçaları (Listbox, Canvas,
-Text) renklerini dönen paletten alır. sv-ttk yoksa 'clam' teması aynı paletle boyanır.
-Tema seçimi: RIFFLE_THEME=light|dark (testler) > Ayarlar > sistem.
+Every window calls `pal = theme.setup(root)` when it opens; classic tk widgets (Listbox, Canvas,
+Text) take their colours from the returned palette. Without sv-ttk the 'clam' theme is painted with the same palette.
+Theme choice: RIFFLE_THEME=light|dark (tests) > Settings > system.
 """
 
 from __future__ import annotations
@@ -21,19 +21,19 @@ ICON_ICO = ASSETS / "riffle.ico"
 @dataclass(frozen=True)
 class Palette:
     dark: bool
-    bg: str          # pencere zemini
-    surface: str     # kart / liste / giriş kutusu zemini
-    canvas: str      # sayfa küçük resimlerinin arkası
+    bg: str          # window background
+    surface: str     # card / list / entry background
+    canvas: str      # behind the page thumbnails
     fg: str
-    muted: str       # ikincil yazı
+    muted: str       # secondary text
     border: str
-    accent: str      # vurgu (seçim çerçevesi, bağlantı)
+    accent: str      # accent (selection frame, link)
     select_bg: str
     select_fg: str
     success: str
     danger: str
-    warn: str        # bölme işareti (turuncu, simgedeki renk)
-    ink: str         # imza mürekkebi
+    warn: str        # split mark (orange, the colour from the icon)
+    ink: str         # signature ink
 
 
 LIGHT = Palette(False, bg="#fafafa", surface="#ffffff", canvas="#eef0f3", fg="#1c1c1c", muted="#5f6670",
@@ -85,7 +85,7 @@ def palette() -> Palette:
     return _current or (DARK if is_dark() else LIGHT)
 
 
-# ------------------------------------------------------------------ yazı tipleri
+# ------------------------------------------------------------------ fonts
 
 def _families(root) -> set:
     from tkinter import font
@@ -105,7 +105,7 @@ def ui_family(root=None) -> str:
 
 
 def _fix_fonts(root) -> None:
-    """sv-ttk 'Segoe UI Variable' ister; Windows 10'da ve Linux'ta yoksa en yakın aileye geç."""
+    """sv-ttk wants 'Segoe UI Variable'; on Windows 10 and Linux, where it is missing, use the closest family."""
     from tkinter import font
     fams = _families(root)
     if not fams:
@@ -131,7 +131,7 @@ def _fix_fonts(root) -> None:
 # ------------------------------------------------------------------ kurulum
 
 def setup(root, *, resizable: bool | None = None) -> Palette:
-    """Pencereye temayı, simgeyi ve başlık çubuğunu uygular; paleti döndürür."""
+    """Applies the theme, icon and title bar to the window; returns the palette."""
     global _current
     from tkinter import ttk
     pal = DARK if is_dark() else LIGHT
@@ -163,7 +163,7 @@ def setup(root, *, resizable: bool | None = None) -> Palette:
 
 
 def setup_styles(root) -> None:
-    """Riffle'a özel stiller (başlık, soluk yazı, başarı/hata) — tema değişince yeniden çağrılır."""
+    """Riffle's own styles (heading, muted text, success/error) — called again when the theme changes."""
     from tkinter import font, ttk
     pal = palette()
     style = ttk.Style(root)
@@ -182,14 +182,14 @@ def setup_styles(root) -> None:
     style.configure("Danger.TLabel", foreground=pal.danger, font="RiffleHeadline")
     style.configure("Big.TLabel", font=("SunValleyBodyLargeFont" if loaded else (fam, 13)))
     if sys.platform == "win32" and getattr(root, "_riffle_titlebar", False):
-        _win_titlebar(root, pal.dark)           # tema canlı değişti (Ayarlar önizlemesi)
+        _win_titlebar(root, pal.dark)           # the theme changed live (Settings preview)
 
 
 def _sv_apply(root, dark: bool) -> None:
-    """sv-ttk temasını uygula. sv-ttk zemin/yazı renklerini <<ThemeChanged>> olayında (tk_setPalette ile)
-    basıyor; olayın ne zaman geleceği belli değil: bazen hiç (pencere açık gri kalıyordu), bazen parçalar
-    kurulduktan sonra (stil renklerini ezip soluk yazıları beyazlatıyordu). Olay bağını kaldırıp renkleri
-    şimdi, parçalar kurulmadan basıyoruz."""
+    """Apply the sv-ttk theme. sv-ttk paints the background/text colours on the <<ThemeChanged>> event (with
+    tk_setPalette); when the event arrives is unpredictable: sometimes never (the window stayed light grey),
+    sometimes after the widgets were built (overwriting the style colours and turning muted text white). We
+    remove the event binding and paint the colours now, before the widgets are built."""
     import sv_ttk
     sv_ttk.set_theme("dark" if dark else "light", root)
     root.tk.call("bind", root.winfo_class(), "<<ThemeChanged>>", "")
@@ -197,7 +197,7 @@ def _sv_apply(root, dark: bool) -> None:
 
 
 def switch(root, dark: bool) -> Palette:
-    """Açık pencerede temayı değiştir (Ayarlar'daki önizleme)."""
+    """Change the theme of an open window (the preview in Settings)."""
     global _current
     _current = DARK if dark else LIGHT
     try:
@@ -209,7 +209,7 @@ def switch(root, dark: bool) -> Palette:
 
 
 def restyle(root) -> None:
-    """Tema canlı değişince: tk_setPalette'in bastığı renkleri temizle ki stil renkleri geçerli olsun."""
+    """When the theme changes live: clear the colours tk_setPalette painted so the style colours apply."""
     from tkinter import ttk
     setup_styles(root)
     stack = [root]
@@ -222,7 +222,7 @@ def restyle(root) -> None:
 
 
 def window(win) -> None:
-    """Simge + (Windows) başlık çubuğu rengi; Toplevel'lar için de çağrılır."""
+    """Icon + (Windows) title bar colour; also called for Toplevels."""
     try:
         if ICON_PNG.exists():
             import tkinter as tk
@@ -232,7 +232,7 @@ def window(win) -> None:
     except Exception:
         pass
     if sys.platform == "win32":
-        # pencerenin Windows çerçevesi ilk gösterimde oluşuyor: başlık rengini o an ver
+        # the window's Windows frame is created on first show: set the title colour at that moment
         def on_map(_e=None):
             if not getattr(win, "_riffle_titlebar", False):
                 win._riffle_titlebar = True
@@ -241,7 +241,7 @@ def window(win) -> None:
 
 
 def _win_titlebar(win, dark: bool) -> None:
-    """Windows 10 (1809+) / 11: başlık çubuğunu koyu/açık yap (DWMWA_USE_IMMERSIVE_DARK_MODE)."""
+    """Windows 10 (1809+) / 11: make the title bar dark/light (DWMWA_USE_IMMERSIVE_DARK_MODE)."""
     try:
         import ctypes
         hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
@@ -253,7 +253,7 @@ def _win_titlebar(win, dark: bool) -> None:
         pass
 
 
-# ------------------------------------------------------------------ klasik tk parçaları
+# ------------------------------------------------------------------ classic tk widgets
 
 def style_listbox(lb, pal: Palette | None = None) -> None:
     pal = pal or palette()

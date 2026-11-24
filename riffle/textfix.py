@@ -1,13 +1,13 @@
-"""PDF metin düzeltmeleri — pdf2docx'e (ve diğer dönüştürücülere) gitmeden önce.
+"""PDF text fixes — before the text goes to pdf2docx (and the other converters).
 
-1. Unicode'u olmayan glifler: ToUnicode tablosu olmayan sembol fontlarında (Elsevier'in
-   MathematicalPi'si, Symbol vb.) μ, α, ± gibi harfler kontrol karakteri (\\x01) olarak gelir ve
-   Word'de kaybolur. Fontun kodlama tablosundaki glif adından gerçek karakter bulunur.
-2. Bağlı harfler (ﬁ, ﬂ, ﬀ …) → ayrı harfler: Word'de arama ve yazım denetimi çalışsın.
-3. Satır sonu tireleri: "devel-" + "oped" → "developed". Gerçek birleşik kelimeler
-   ("water-based") belgede tireli geçiyorsa ya da bilinen bir ek/önekse korunur.
-4. Alt simge: TiO₂'deki "2" gibi küçük ve satırın altına inen parçalar alt simge olur
-   (pdf2docx yalnızca üst simgeyi tanıyor).
+1. Glyphs without Unicode: in symbol fonts with no ToUnicode table (Elsevier's
+   MathematicalPi, Symbol etc.) letters like μ, α, ± arrive as control characters (\\x01) and
+   disappear in Word. The real character is found from the glyph name in the font's encoding table.
+2. Ligatures (ﬁ, ﬂ, ﬀ …) → separate letters, so search and spell check work in Word.
+3. Line-end hyphens: "devel-" + "oped" → "developed". Real compound words
+   ("water-based") are kept if they appear hyphenated in the document or are a known prefix/suffix.
+4. Subscripts: small pieces that drop below the line, like the "2" in TiO₂, become subscripts
+   (pdf2docx only recognises superscripts).
 """
 
 from __future__ import annotations
@@ -18,18 +18,18 @@ from collections import Counter
 
 from .actions import pymupdf
 
-SUBSCRIPT_FLAG = 1 << 12          # pdf2docx'in kullanmadığı bir bayrak biti: "alt simge"
+SUBSCRIPT_FLAG = 1 << 12          # a flag bit pdf2docx does not use: "subscript"
 
 LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
              "ﬅ": "st", "ﬆ": "st",
-             # PDF'te çizilmiş bir yumuşak tire (U+00AD) görünür bir tiredir: Arial gibi tire ile yumuşak
-             # tireyi aynı harf şekline bağlayan yazı tipleri metne '\xad' koyuyor, satır sonu birleştirme
-             # ve birleşik kelimeler ('water-based') bunu görmüyordu
+             # A soft hyphen (U+00AD) drawn in a PDF is a visible hyphen: fonts like Arial that map hyphen and soft
+             # hyphen to the same glyph put '\xad' in the text, and line-end joining
+             # and compound words ('water-based') didn't see it
              "\u00ad": "-"}
 
-# Elsevier / Bitstream "MathematicalPi" fontlarının glif adları (H + kod) — standart listede yok.
-# Küçük Yunan harfleri sıralı (H9262 = μ gerçek bir makalede doğrulandı); emin olunmayan kodlar
-# bilerek eklenmedi: yanlış harf koymak, harfi hiç koymamaktan kötü.
+# Glyph names of the Elsevier / Bitstream "MathematicalPi" fonts (H + code) — not in the standard list.
+# Lowercase Greek letters are in sequence (H9262 = μ verified in a real paper); codes we were not sure of
+# were left out on purpose: a wrong letter is worse than no letter.
 _GREEK = "αβγδεζηθικλμνξοπρστυφχψω"
 MATHPI = {f"H{9251 + i}": c for i, c in enumerate(_GREEK)}
 _EXTRA_NAMES = {"mu": "μ", "mu1": "μ", "micro": "µ", "Omega": "Ω", "degree": "°", "minus": "−",
@@ -37,7 +37,7 @@ _EXTRA_NAMES = {"mu": "μ", "mu1": "μ", "micro": "µ", "Omega": "Ω", "degree":
                 "approxequal": "≈", "infinity": "∞", "arrowright": "→", "partialdiff": "∂",
                 "summation": "∑", "radical": "√", "periodcentered": "·", "similar": "∼"}
 
-# satır sonunda tiresi korunan birleşik kelime parçaları
+# compound word parts that keep their hyphen at the end of a line
 KEEP_SUFFIX = {"based", "free", "like", "related", "scale", "type", "specific", "dependent", "induced",
                "assisted", "controlled", "rich", "level", "wide", "known", "term", "made", "friendly",
                "rate", "layer", "phase", "state", "order", "time", "size", "point", "mode", "step",
@@ -66,7 +66,7 @@ def _unicode_for(name: str) -> str | None:
 
 
 def _code_names(doc, xref: int) -> dict[int, str]:
-    """Fontun kod → glif adı tablosu (/Differences ya da gömülü CFF/Type1 kodlaması)."""
+    """The font's code → glyph name table (/Differences or the embedded CFF/Type1 encoding)."""
     names: dict[int, str] = {}
     try:
         obj = doc.xref_object(xref)
@@ -85,7 +85,7 @@ def _code_names(doc, xref: int) -> dict[int, str]:
                 code = int(tok)
     if names:
         return names
-    try:                                   # gömülü CFF'in kendi kodlaması
+    try:                                   # the embedded CFF's own encoding
         _, ext, _, buf = doc.extract_font(xref)
         if ext == "cff" and buf:
             import io
@@ -102,7 +102,7 @@ def _code_names(doc, xref: int) -> dict[int, str]:
 
 
 def build_char_map(doc) -> dict[str, dict[str, str]]:
-    """{font adı: {bozuk karakter: doğru karakter}} — yalnızca Unicode'u olmayan fontlar için."""
+    """{font name: {broken character: correct character}} — only for fonts without Unicode."""
     out: dict[str, dict[str, str]] = {}
     seen = set()
     for page in doc:
@@ -114,7 +114,7 @@ def build_char_map(doc) -> dict[str, dict[str, str]]:
             m = {}
             for code, name in names.items():
                 if code >= 0x110000 or not _bad.match(chr(code)):
-                    continue                    # yalnızca bozuk gelen (kontrol/özel alan) kodları düzelt
+                    continue                    # fix only codes that arrive broken (control/private use area)
                 u = _unicode_for(name)
                 if u:
                     m[chr(code)] = u
@@ -133,7 +133,7 @@ def vocabulary(doc) -> Counter:
 
 
 def keep_hyphen(left: str, right: str, words: Counter) -> bool:
-    """Satır sonundaki tire gerçek bir birleşik kelimenin mi?"""
+    """Is the hyphen at the end of the line part of a real compound word?"""
     l, r = left.lower(), right.lower()
     joined, hyph = words[l + r], words[f"{l}-{r}"]
     if hyph > joined:
@@ -145,7 +145,7 @@ def keep_hyphen(left: str, right: str, words: Counter) -> bool:
     return r in KEEP_SUFFIX or l in KEEP_PREFIX
 
 
-# ---------------------------------------------------------------- rawdict düzeltme
+# ---------------------------------------------------------------- rawdict fixes
 
 def _span_text(span) -> str:
     return "".join(c["c"] for c in span["chars"]) if "chars" in span else span.get("text", "")
@@ -175,7 +175,7 @@ def _fix_chars_raw(span, cmap):
                 nc["origin"] = (c["origin"][0] + k * w, c["origin"][1])
                 new.append(nc)
             continue
-        if len(ch) > 1:                     # tek glif → birden çok harf (nadiren)
+        if len(ch) > 1:                     # one glyph → several letters (rare)
             ch = ch[0]
         c = dict(c)
         c["c"] = ch
@@ -199,20 +199,20 @@ def _mark_subscripts(line):
         if not t or len(t) > 4 or s["size"] > body * 0.85:
             continue
         dy = s["origin"][1] - base_y
-        if dy > body * 0.08:                  # satırın altında → alt simge
+        if dy > body * 0.08:                  # below the line → subscript
             s["flags"] = (s["flags"] | SUBSCRIPT_FLAG) & ~1
-        elif dy < -body * 0.2:                # satırın üstünde → üst simge
+        elif dy < -body * 0.2:                # above the line → superscript
             s["flags"] |= 1
 
 
 def _dehyphenate(blocks, words, stats):
-    # satırlar blok sınırını da aşar: paragrafın son satırı bir sonraki blokta (sütun/şekil arası) sürebilir
+    # lines cross block boundaries too: the last line of a paragraph may continue in the next block (across a column/figure)
     lines = [ln for b in blocks if b.get("type", 0) == 0 for ln in b.get("lines", [])]
     for a, b in zip(lines, lines[1:]):
         if not a.get("spans") or not b.get("spans"):
             continue
         spans = a["spans"]
-        # satır sonundaki yalnızca-boşluk parçaları ("devel-" + " ") tireyi gizler
+        # whitespace-only pieces at the end of a line ("devel-" + " ") hide the hyphen
         n = len(spans)
         while n > 1 and "chars" in spans[n - 1] and not _span_text(spans[n - 1]).strip():
             n -= 1
@@ -220,7 +220,7 @@ def _dehyphenate(blocks, words, stats):
         chars = last.get("chars")
         if not chars:
             continue
-        # sondaki boşlukları atla
+        # skip the trailing spaces
         k = len(chars) - 1
         while k >= 0 and chars[k]["c"].isspace():
             k -= 1
@@ -231,18 +231,18 @@ def _dehyphenate(blocks, words, stats):
         right = re.match(r"\s*([^\W\d_]+)", _span_text(first)) if first else None
         if not left or not right:
             continue
-        del chars[k + 1:]                     # sondaki boşluklar
+        del chars[k + 1:]                     # trailing spaces
         del spans[n:]
         if chars[k]["c"] == "\u00ad" or not keep_hyphen(left.group(1), right.group(1), words):
-            # görünmez işaret (U+2060): pdf2docx satırları birleştirirken araya boşluk koymaz
-            # ("devel" + "oped"); Word dosyasından sonra silinir (actions._fix_layout_xml)
+            # invisible mark (U+2060): pdf2docx inserts no space when joining the lines
+            # ("devel" + "oped"); removed from the Word file afterwards (actions._fix_layout_xml)
             chars[k] = dict(chars[k], c="\u2060")
             stats["hyph"] += 1
 
 
 def _merge_symbol_spans(line, fixed_ids):
-    """Kurtarılan sembolü (μ) yanındaki metin parçasına kat: "500 μs" ayrı fontta kalınca pdf2docx
-    araya boşluk koyuyor ("μ s"). Metin fontu μ'yü zaten çizebiliyor."""
+    """Merge the recovered symbol (μ) into the neighbouring text piece: when "500 μs" stays in a separate font,
+    pdf2docx inserts a space ("μ s"). The text font can draw μ anyway."""
     spans = line.get("spans", [])
     i = 0
     while i < len(spans):
@@ -286,8 +286,8 @@ def fix_page_dict(raw: dict, cmap: dict, words: Counter | None, stats: Counter) 
 
 @contextlib.contextmanager
 def patched_text(doc_path, dehyphenate: bool = True):
-    """pdf2docx çalışırken Page.get_text('rawdict'/'dict') çıktısını düzelten bağlam.
-    Kullanım: with patched_text(src) as stats: Converter(src).convert(...)"""
+    """Context that fixes the output of Page.get_text('rawdict'/'dict') while pdf2docx runs.
+    Usage: with patched_text(src) as stats: Converter(src).convert(...)"""
     with pymupdf.open(doc_path) as d:
         cmap = build_char_map(d)
         words = vocabulary(d) if dehyphenate else None
@@ -297,7 +297,7 @@ def patched_text(doc_path, dehyphenate: bool = True):
     from .parallel import check_cancel
 
     def get_text(self, option="text", *a, **kw):
-        check_cancel()                            # İptal: pdf2docx her sayfada buradan geçer
+        check_cancel()                            # Cancel: pdf2docx passes through here on every page
         res = orig(self, option, *a, **kw)
         if option in ("rawdict", "dict") and isinstance(res, dict):
             fix_page_dict(res, cmap, words, stats)
@@ -317,7 +317,7 @@ def patched_text(doc_path, dehyphenate: bool = True):
 
 
 def _patch_pdf2docx_subscript():
-    """pdf2docx'e alt simge desteği ekler; geri alma fonksiyonunu döndürür."""
+    """Adds subscript support to pdf2docx; returns the function that undoes it."""
     try:
         from pdf2docx.text.TextSpan import TextSpan
     except Exception:
@@ -338,9 +338,9 @@ def _patch_pdf2docx_subscript():
 
 
 def _patch_pdf2docx_line_join():
-    """pdf2docx satırları birleştirirken araya boşluğu 'c.encode().isalnum()' ile karar veriyor: Türkçe
-    harfler (ı, ş, ğ, ü, ö, ç) UTF-8'de çok baytlı olduğu için harf sayılmıyor ve 'taraması' + 'bölümleri'
-    → 'taramasıbölümleri' oluyordu. Aynı mantık, Unicode harf kontrolüyle."""
+    """When joining lines, pdf2docx decides on the space with 'c.encode().isalnum()': Turkish
+    letters (ı, ş, ğ, ü, ö, ç) are multi-byte in UTF-8, so they didn't count as letters and 'taraması' + 'bölümleri'
+    → 'taramasıbölümleri'. Same logic, with a Unicode letter check."""
     try:
         import string
         from pdf2docx.text.Lines import Lines

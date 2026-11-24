@@ -1,16 +1,16 @@
-"""Akan belgeler için PDF analizi ve DOCX bölüm düzeltmeleri.
+"""PDF analysis and DOCX section fixes for flowing documents.
 
-1) Figür kurtarma (PDF ön işleme):
-   pdf2docx vektör çizimleri (grafikler) tamamen atlıyor, faks (CCITT) / JBIG2 /
-   maske resimlerini de okuyamıyor. Bu bölgeleri orijinalden yüksek çözünürlükte
-   resme çevirip aynı yere koyuyoruz; pdf2docx sıradan bir resim olarak aktarıyor.
+1) Figure recovery (PDF preprocessing):
+   pdf2docx skips vector drawings (charts) entirely and can't read fax (CCITT) / JBIG2 /
+   mask images either. We render these regions from the original at high resolution
+   and put the image in the same place; pdf2docx carries it over as an ordinary image.
 
-2) Sayfa akışı (DOCX son işleme):
-   pdf2docx her PDF sayfasını 'yeni sayfa' bölüm sonuyla bitiriyor. Word'de birkaç
-   satır taşınca sonraki sayfa neredeyse boş kalıyor. Orijinalde DOLU biten
-   sayfalardan sonraki geçişler 'sürekli' yapılır (metin akar), tekrar eden üst/alt
-   bilgiler (dergi adı, sayfa no) silinir. Yarıda biten sayfalar (kasıtlı sayfa
-   sonu) korunur.
+2) Page flow (DOCX postprocessing):
+   pdf2docx ends every PDF page with a 'new page' section break. When a few lines
+   overflow in Word, the next page is left almost empty. After pages that end FULL in the
+   original, the transitions are made 'continuous' (text flows) and repeating headers/
+   footers (journal name, page number) are removed. Pages that end half-way (deliberate
+   page break) are kept.
 """
 
 from __future__ import annotations
@@ -24,17 +24,17 @@ try:
 except ImportError:  # pragma: no cover
     try:
         import fitz as pymupdf  # type: ignore
-    except ImportError:          # install.py kütüphaneler kurulmadan da yükleyebilsin
+    except ImportError:          # so install.py can load it before the libraries are installed
         pymupdf = None  # type: ignore
 
 FIG_DPI = 200
-BAND = 0.075  # sayfanın üst/alt %7,5'i: üst bilgi / alt bilgi bandı
+BAND = 0.075  # top/bottom 7.5% of the page: header / footer band
 
 
-# =========================================================== 1) figür kurtarma
+# =========================================================== 1) figure recovery
 
 def _shape_score(path: dict) -> int:
-    """Grafik gibi mi? Eğri ve çapraz çizgi sayısı (tablo kenarlığı/dolgu 0 alır)."""
+    """Does it look like a chart? Number of curves and diagonal lines (table borders/fills score 0)."""
     score = 0
     for it in path.get("items", []):
         if it[0] == "c":
@@ -70,9 +70,9 @@ _BAD_IMG = ("CCITTFaxDecode", "JBIG2Decode", "JPXDecode")
 
 
 def figure_regions(page) -> list:
-    """Bu sayfada pdf2docx'in kaçıracağı figür bölgeleri."""
+    """Figure regions on this page that pdf2docx would miss."""
     regions = []
-    # a) Grafik benzeri vektör çizim kümeleri
+    # a) Chart-like clusters of vector drawings
     drawings = page.get_drawings()
     if drawings:
         groups: list[tuple] = []  # (rect, score, count)
@@ -83,7 +83,7 @@ def figure_regions(page) -> list:
         for rect, score, count in groups:
             if score >= 8 and rect.width >= 40 and rect.height >= 30:
                 regions.append(rect)
-    # b) pdf2docx'in okuyamadığı resimler
+    # b) Images pdf2docx can't read
     for im in page.get_images(full=True):
         xref, smask, cs, filt = im[0], im[1], im[5], im[8]
         if filt in _BAD_IMG or cs == "" or im[4] == 1:
@@ -96,8 +96,8 @@ def figure_regions(page) -> list:
     if not regions:
         return []
     regions = _cluster(regions, gap=4)
-    # Figürün içindeki / hemen dibindeki kısa etiketleri (eksen yazıları) dahil et,
-    # 'Fig.' / 'Table' / 'Şekil' ile başlayan başlıkları DIŞARIDA bırak.
+    # Include short labels (axis text) inside / right next to the figure,
+    # leave captions starting with 'Fig.' / 'Table' / 'Şekil' OUTSIDE.
     lines = []
     for b in page.get_text("dict")["blocks"]:
         for ln in b.get("lines", []):
@@ -114,10 +114,10 @@ def figure_regions(page) -> list:
             if lr.intersects(r + (-14, -14, 14, 14)):
                 grown |= lr
         grown &= page.rect
-        # sayfanın yarısından büyük 'figür' muhtemelen yanlış alarm (sayfa çerçevesi vb.)
+        # a 'figure' bigger than half the page is probably a false alarm (page frame etc.)
         if grown.is_empty or grown.get_area() > 0.6 * page.rect.get_area():
             continue
-        # içi yazıyla dolu bölge figür değil, yuvarlak köşeli metin kutusu / tablo
+        # a region full of text is not a figure but a rounded text box / table
         text_area = sum((lr & grown).get_area() for lr, t in lines if lr.intersects(grown))
         if text_area > 0.25 * grown.get_area():
             continue
@@ -126,7 +126,7 @@ def figure_regions(page) -> list:
 
 
 def rescue_figures(doc) -> int:
-    """Figür bölgelerini yerinde resme çevirir. Kurtarılan figür sayısını döndürür."""
+    """Renders figure regions to images in place. Returns the number of recovered figures."""
     count = 0
     for page in doc:
         regions = figure_regions(page)
@@ -138,7 +138,7 @@ def rescue_figures(doc) -> int:
             shots.append((r, pix.tobytes("png")))
         for r, _ in shots:
             page.add_redact_annot(r, fill=(1, 1, 1))
-        # bölgedeki resimleri, çizimleri ve yazıyı kaldır
+        # remove the images, drawings and text in the region
         page.apply_redactions(images=1, graphics=2, text=0)
         for r, png in shots:
             page.insert_image(r, stream=png)
@@ -146,25 +146,25 @@ def rescue_figures(doc) -> int:
     return count
 
 
-# =========================================================== 2) sayfa analizi
+# =========================================================== 2) page analysis
 
 @dataclass
 class PageInfo:
-    full: list[bool] = field(default_factory=list)       # sayfa dolu mu bitiyor
-    headers: set[str] = field(default_factory=set)        # tekrar eden üst/alt bilgi (normalize)
-    page_numbers: set[str] = field(default_factory=set)   # bant içindeki salt sayı satırları
-    rules: list = field(default_factory=list)             # paragraf kenarlığı olacak yatay çizgiler
+    full: list[bool] = field(default_factory=list)       # does the page end full
+    headers: set[str] = field(default_factory=set)        # repeating header/footer (normalized)
+    page_numbers: set[str] = field(default_factory=set)   # number-only lines inside the band
+    rules: list = field(default_factory=list)             # horizontal lines that will become paragraph borders
 
 
-# =========================================================== yatay ayırıcı çizgiler
+# =========================================================== horizontal separator lines
 
 @dataclass
 class Rule:
-    text: str            # çizginin yapışacağı satırın metni (normalize)
-    side: str            # "bottom": çizgi satırın altında · "top": üstünde
+    text: str            # text of the line the rule attaches to (normalized)
+    side: str            # "bottom": rule below the line · "top": above it
     color: str           # RRGGBB
     width: float         # pt
-    gap: float           # metinle çizgi arası, pt
+    gap: float           # gap between text and rule, pt
 
 
 def _rgb(c) -> str:
@@ -173,11 +173,11 @@ def _rgb(c) -> str:
 
 
 def find_rules(page) -> list[Rule]:
-    """Başlık altı / bölüm ayırıcı gibi tek başına duran yatay çizgiler.
+    """Stand-alone horizontal lines such as heading underlines / section separators.
 
-    pdf2docx yalnızca tablo kenarlığı ve alt çizgiyi tanıyor; sayfa boyu ayırıcı çizgiler
-    Word'de kayboluyordu. Bunlar en yakın satırın paragraf kenarlığı olarak geri konur.
-    Tablo çizgileri (dikey çizgiyle kesişen ya da tablo içindeki) ve kelime altı çizgileri atlanır.
+    pdf2docx only recognises table borders and underlines; page-wide separator lines
+    were lost in Word. They are put back as a paragraph border on the nearest line.
+    Table lines (crossing a vertical line or inside a table) and word underlines are skipped.
     """
     W = page.rect.width
     try:
@@ -208,18 +208,18 @@ def find_rules(page) -> list[Rule]:
         if any(rr.intersects(t + (-3, -3, 3, 3)) for t in tables):
             continue
         if any(rr.x0 - 3 <= v.x0 <= rr.x1 + 3 and v.y0 - 3 <= rr.y0 <= v.y1 + 3 for v in vert):
-            continue                                    # dikey çizgiyle kesişiyor: tablo/çerçeve
+            continue                                    # crosses a vertical line: table/frame
         if any(abs(rr.y0 - s.y0) < 1.5 and abs(rr.x0 - s.x0) < 3 for s in seen):
-            continue                                    # aynı çizgi iki kez (kontur + dolgu)
+            continue                                    # same line twice (stroke + fill)
         overlap = [(lr, t) for lr, t in lines if min(lr.x1, rr.x1) - max(lr.x0, rr.x0) > 0]
         above = [(rr.y0 - lr.y1, lr, t) for lr, t in overlap if -1 <= rr.y0 - lr.y1 <= 18]
         below = [(lr.y0 - rr.y1, lr, t) for lr, t in overlap if -1 <= lr.y0 - rr.y1 <= 18]
         if above and below and min(x[0] for x in above) < 6 and min(x[0] for x in below) < 6:
-            continue                                    # kesir çizgisi / sıkışık tablo satırı
+            continue                                    # fraction bar / tight table row
         if above:
             gap, lr, t = min(above, key=lambda x: x[0])
             if gap < 3 and lr.width > 0.85 * rr.width:
-                continue                                # kelime altı çizgisi: pdf2docx zaten yapıyor
+                continue                                # word underline: pdf2docx already does it
             side = "bottom"
         elif below:
             gap, lr, t = min(below, key=lambda x: x[0])
@@ -227,11 +227,11 @@ def find_rules(page) -> list[Rule]:
         else:
             continue
         if len(_norm_text(t)) < 3 or (lr.width < 0.15 * rr.width and rr.width < 0.5 * W):
-            continue                                    # denklemdeki birim/sembol satırı, ayırıcı değil
+            continue                                    # unit/symbol line in an equation, not a separator
         width = d.get("width") or rr.height or 0.75
         color = d.get("color") if d.get("color") is not None else d.get("fill")
         if color is not None and min(color[:3]) > 0.94:
-            continue                                    # beyaz çizgi: görünmez
+            continue                                    # white line: invisible
         out.append(Rule(_norm_text(t), side, _rgb(color), max(0.25, min(float(width), 6.0)), max(0.0, gap)))
         seen.append(rr)
     return out
@@ -241,15 +241,15 @@ _LIG = {"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi", "\ufb04
 
 
 def _norm_text(t: str) -> str:
-    """Eşleştirme anahtarı: yalnızca harf/rakam (bağlı harf açılmış, tire/boşluk/sembol atılmış).
-    Word tarafında satır sonu tireleri birleşmiş, μ kurtarılmış olabilir; ikisi de aynı anahtara iner."""
+    """Matching key: letters/digits only (ligatures expanded, hyphens/spaces/symbols dropped).
+    On the Word side line-end hyphens may be joined and μ recovered; both reduce to the same key."""
     t = "".join(_LIG.get(c, c) for c in t)
     return re.sub(r"[\W_]+", "", t).lower()
 
 
 def is_two_column(doc, sample: int = 12) -> bool:
-    """Akademik makale gibi iki sütunlu mu? Sayfaların çoğunda iki yanda da dolu sütun olmalı
-    ve ortayı kesen satırlar az olmalı."""
+    """Two columns like an academic paper? Most pages should have filled columns on both sides
+    and few lines crossing the middle."""
     pages = [doc[i] for i in range(min(len(doc), sample))]
     votes = total = 0
     for page in pages:
@@ -266,12 +266,12 @@ def is_two_column(doc, sample: int = 12) -> bool:
                     continue
                 r = pymupdf.Rect(ln["bbox"])
                 if any(r.intersects(t) for t in tables):
-                    continue                            # tablo hücreleri sütun sayılmaz
+                    continue                            # table cells don't count as columns
                 x0, x1 = r.x0, r.x1
                 if x1 - x0 > 0.55 * W:
                     cross += 1
                 elif x1 - x0 < 0.28 * W:
-                    continue                            # kısa satırlar (paragraf sonu, etiket) oy vermez
+                    continue                            # short lines (paragraph ends, labels) don't vote
                 elif x1 <= mid + 6:
                     left += 1
                 elif x0 >= mid - 6:
@@ -286,7 +286,7 @@ def is_two_column(doc, sample: int = 12) -> bool:
 
 
 def _norm(t: str) -> str:
-    # boşluklar tamamen atılır: boşluksuz PDF'lerde Word metni 'JournalofMaterials' olabiliyor
+    # spaces are dropped entirely: in PDFs without spaces the Word text may be 'JournalofMaterials'
     return re.sub(r"\s+", "", re.sub(r"\d+", "#", t)).lower()
 
 
@@ -329,13 +329,13 @@ def analyze_pages(doc) -> PageInfo:
     if not bottoms:
         return info
     line_h = sorted(heights)[len(heights) // 2] if heights else 12
-    ref = sorted(bottoms)[int(0.75 * (len(bottoms) - 1))]  # tipik dolu sayfanın alt sınırı (dipnota duyarsız)
+    ref = sorted(bottoms)[int(0.75 * (len(bottoms) - 1))]  # lower bound of a typical full page (insensitive to footnotes)
     info.full = [b >= max(ref - 2.5 * line_h, 0.75 * page.rect.height)
                  for b, page in zip(bottoms, doc)]
     return info
 
 
-# =========================================================== 3) DOCX bölümleri
+# =========================================================== 3) DOCX sections
 
 _SECT_P = re.compile(r'<w:p><w:pPr><w:sectPr>(.*?)</w:sectPr></w:pPr></w:p>', re.S)
 
@@ -351,8 +351,8 @@ def _cols(sect: str) -> str:
 
 
 def _unify_page_setup(sections):
-    """Yalnızca 'sürekli' geçişle birbirine bağlı bölüm zincirlerini eşitler;
-    yeni sayfa ile başlayan bölüm yeni bir zincir başlatır (kendi boşluğunu korur)."""
+    """Equalizes only chains of sections joined by 'continuous' transitions;
+    a section starting with a new page starts a new chain (keeps its own margins)."""
     out, chain = [], []
     for c, s in sections:
         if chain and _stype(s) in ("nextPage", "oddPage", "evenPage"):
@@ -387,8 +387,8 @@ def _unify_chain(sections):
 
 
 def _unify_reference_indents(xml: str) -> str:
-    """'[12] Yazar, ...' kaynakça girdileri: sayfadaki sütun konumundan gelen farklı
-    girintileri en yaygın asılı girintiye eşitle."""
+    """'[12] Author, ...' reference entries: set the different indents coming from the column
+    position on the page to the most common hanging indent."""
     paras = re.findall(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', xml, re.S)
     refs = [p for p in paras if re.match(r'\s*\[\d{1,3}\]', _ptext(p))]
     if len(refs) < 4:
@@ -405,7 +405,7 @@ def _unify_reference_indents(xml: str) -> str:
 
 
 def _fit_to_column(xml: str) -> str:
-    """Tam sayfa genişliğine göre girintilenmiş paragrafları dar sütuna uydurur."""
+    """Fits paragraphs indented relative to the full page width into a narrow column."""
     def ind(m):
         a = dict(re.findall(r'w:(\w+)="(-?\d+)"', m.group(0)))
         left = min(int(a.get("left", 0)), 284)
@@ -417,7 +417,7 @@ def _fit_to_column(xml: str) -> str:
 
 
 def _split_at_tab(p: str):
-    """'<sol> <w:tab/> <sağ>' tek sekmeli paragrafı iki paragrafa böler; değilse None."""
+    """Splits a single-tab '<left> <w:tab/> <right>' paragraph into two paragraphs; otherwise None."""
     tabs = re.findall(r'<w:r(?: [^>]*)?>(?:<w:rPr>(?:(?!</w:r>).)*?</w:rPr>)?<w:tab/></w:r>', p, re.S)
     if len(tabs) != 1:
         return None
@@ -452,28 +452,28 @@ def reflow_sections(xml: str, info: PageInfo) -> str:
     if not fm or not body.endswith("</w:sectPr>") or body[:fm.start()].endswith("<w:pPr>"):
         return xml
     final_inner = body[fm.end():-len("</w:sectPr>")]
-    # Bölümleri ayır: [(içerik, sectPr_iç)]
+    # Split into sections: [(content, inner sectPr)]
     secs, pos = [], 0
     for m in _SECT_P.finditer(body[:fm.start()]):
         secs.append([body[pos:m.start()], m.group(1)])
         pos = m.end()
     secs.append([body[pos:fm.start()], final_inner])
 
-    # Sayfa numarası ata: 'yeni sayfa' ile başlayan her bölüm yeni PDF sayfası
+    # Assign page numbers: every section starting with 'new page' is a new PDF page
     page_of, page = [], -1
     for _, s in secs:
         if _stype(s) in ("nextPage", "oddPage", "evenPage"):
             page += 1
         page_of.append(max(page, 0))
     if page + 1 != len(info.full):
-        return xml  # eşleşmiyor: güvenli tarafta kal
+        return xml  # no match: stay on the safe side
     flow_into = [False] + [info.full[p - 1] for p in range(1, len(info.full))]
     flow_pages = {p for p in range(len(info.full))
                   if flow_into[p] or (p + 1 < len(flow_into) and flow_into[p + 1])}
     if not any(flow_into):
         return xml
 
-    # a) Dolu sayfadan sonraki sayfa: 'sürekli' başlasın
+    # a) Page after a full page: start 'continuous'
     for k, (_, s) in enumerate(secs):
         if k and page_of[k] != page_of[k - 1] and flow_into[page_of[k]]:
             if "<w:type " in s:
@@ -482,7 +482,7 @@ def reflow_sections(xml: str, info: PageInfo) -> str:
                 s = '<w:type w:val="continuous"/>' + s
             secs[k][1] = s
 
-    # b) Akan sayfalarda üst/alt bilgileri sil
+    # b) Remove headers/footers on flowing pages
     def drop_headers(content: str) -> str:
         def f(m):
             p = m.group(0)
@@ -491,7 +491,7 @@ def reflow_sections(xml: str, info: PageInfo) -> str:
                 return p
             if _norm(t) in info.headers or (t.isdigit() and t in info.page_numbers):
                 return ""
-            # 'Dergi adı 342' gibi birleşik satırlar
+            # combined lines like 'Journal name 342'
             if any(h in _norm(t) for h in info.headers if len(h) >= 12) and len(t) < 160:
                 return ""
             return p
@@ -501,10 +501,10 @@ def reflow_sections(xml: str, info: PageInfo) -> str:
         if page_of[k] in flow_pages:
             secs[k][0] = drop_headers(secs[k][0])
 
-    # b2) İki sütunlu bölümlerin arasında kalmış kısa tek sütunlu 'adalar':
-    #     - yan yana başlık satırı ('5. Costs <sekme> Acknowledgements'): sol parça sol
-    #       sütunun, sağ parça sağ sütunun başına taşınır
-    #     - kısa dipnot vb.: sütun akışına katılır (Word aksi hâlde sütunları dengeler)
+    # b2) Short single-column 'islands' stuck between two-column sections:
+    #     - side-by-side heading line ('5. Costs <tab> Acknowledgements'): the left part goes to the start
+    #       of the left column, the right part to the start of the right column
+    #     - short footnote etc.: joins the column flow (otherwise Word balances the columns)
     def multi(k):
         return 0 <= k < len(secs) and _cols(secs[k][1]) != "1"
 
@@ -534,9 +534,9 @@ def reflow_sections(xml: str, info: PageInfo) -> str:
             secs[k - 1][0] += _fit_to_column(c)
             secs[k][0] = ""
 
-    # c) Akan sayfalarda: aynı sütun düzenindeki ardışık bölümleri ve üst bilgisi
-    #    silinip boş kalan bölümleri birleştir. Sütunlar sayfa sayfa değil, gerçek
-    #    bir makale gibi akar; Word gereksiz sütun dengelemesi yapmaz.
+    # c) On flowing pages: merge consecutive sections with the same column layout and sections
+    #    left empty after their header was removed. Columns flow like a real paper, not
+    #    page by page; Word doesn't balance columns needlessly.
     items = [[c, s, page_of[k] in flow_pages] for k, (c, s) in enumerate(secs)]
     changed = True
     while changed:
@@ -547,7 +547,7 @@ def reflow_sections(xml: str, info: PageInfo) -> str:
                 continue
             if _cols(ps) != _cols(s) and _has_content(pc):
                 continue
-            # birleşik bölüm: öncekinin başlangıç türü + sonrakinin sayfa/sütun özellikleri
+            # merged section: start type of the first + page/column properties of the next
             t = _stype(ps)
             s = re.sub(r'<w:type w:val="\w+"/>', '', s)
             if t != "nextPage":
@@ -557,9 +557,9 @@ def reflow_sections(xml: str, info: PageInfo) -> str:
             break
     merged = [[c, s] for c, s, _ in items]
 
-    # d) Word, kenar boşlukları değişen 'sürekli' bölüm sonunu SAYFA SONU gibi uygular
-    #    (LibreOffice uygulamaz). pdf2docx her PDF sayfasına kendi boşluklarını veriyor
-    #    (tek/çift sayfa farkı); akan belgede hepsini eşitle, sütunları eşit genişlik yap.
+    # d) Word applies a 'continuous' section break with changing margins like a PAGE BREAK
+    #    (LibreOffice doesn't). pdf2docx gives every PDF page its own margins
+    #    (odd/even page difference); in a flowing document make them all equal, columns equal width.
     merged = _unify_page_setup(merged)
     merged = [[_unify_reference_indents(c) if _cols(s) != "1" else c, s] for c, s in merged]
 

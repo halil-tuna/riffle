@@ -1,4 +1,4 @@
-"""PDF → Word metin düzeltmeleri: kayıp semboller (μ), satır sonu tireleri, alt simge, bağlı harfler."""
+"""PDF → Word text fixes: lost symbols (μ), line-end hyphens, subscripts, ligatures."""
 
 import re
 import zipfile
@@ -19,7 +19,7 @@ def _docx_text(path):
 
 
 def _mu_pdf(path):
-    """ToUnicode'u olmayan Elsevier MathematicalPi fontu: μ, PDF'ten \\x01 olarak okunur."""
+    """Elsevier MathematicalPi font without ToUnicode: μ is read from the PDF as \\x01."""
     content = (b"BT /F1 11 Tf 72 700 Td (Pulses of 500 ) Tj /F2 11 Tf (\\001) Tj /F1 11 Tf (s were applied.) Tj "
                b"0 -14 Td (Roughness was 40 ) Tj /F2 11 Tf (\\001) Tj /F1 11 Tf (m at most.) Tj ET")
     objs = [
@@ -48,7 +48,7 @@ def _mu_pdf(path):
 
 def test_char_map_mathpi(tmp_path):
     d = pymupdf.open(_mu_pdf(tmp_path / "mu.pdf"))
-    assert "\x01" in d[0].get_text()                         # hata gerçekten var
+    assert "\x01" in d[0].get_text()                         # the bug really exists
     assert textfix.build_char_map(d) == {"MathematicalPi-One": {"\x01": "μ"}}
 
 
@@ -66,12 +66,12 @@ def test_word_keeps_mu(tmp_path):
 
 
 @pytest.mark.parametrize("left,right,keep", [
-    ("devel", "oped", False),          # belgede 'developed' geçiyor
-    ("water", "based", True),          # belgede 'water-based' geçiyor
-    ("hydro", "gen", False),           # hiç geçmiyor, ek değil → birleştir
-    ("self", "contained", True),       # bilinen önek
-    ("oil", "based", True),            # bilinen ek
-    ("Ti", "Al", True),                # büyük harfle başlıyor
+    ("devel", "oped", False),          # 'developed' appears in the document
+    ("water", "based", True),          # 'water-based' appears in the document
+    ("hydro", "gen", False),           # never appears, not a suffix → join
+    ("self", "contained", True),       # known prefix
+    ("oil", "based", True),            # known suffix
+    ("Ti", "Al", True),                # starts with a capital letter
 ])
 def test_keep_hyphen(left, right, keep):
     words = Counter({"developed": 3, "water-based": 2})
@@ -103,7 +103,7 @@ def test_word_dehyphenation(tmp_path):
     assert "highly developed technology" in flat
     assert "hydrocarbon oil" in flat
     assert "workpiece in" in flat
-    assert "second water-based fluid" in flat           # gerçek birleşik kelime korunur
+    assert "second water-based fluid" in flat           # a real compound word is kept
     assert "self-contained" in flat
     assert "devel-" not in flat and "devel oped" not in flat
     assert "⁠" not in text
@@ -128,7 +128,7 @@ def test_subscript_and_ligature(tmp_path):
 
 
 def test_patch_restored(tmp_path):
-    """Dönüşüm hata verse bile pymupdf ve pdf2docx yamaları geri alınır."""
+    """pymupdf and pdf2docx patches are undone even if the conversion fails."""
     from pdf2docx.text.TextSpan import TextSpan
     orig, orig_fmt = pymupdf.Page.get_text, TextSpan._set_text_format
     src = _mu_pdf(tmp_path / "mu.pdf")
@@ -139,7 +139,7 @@ def test_patch_restored(tmp_path):
     assert pymupdf.Page.get_text is orig and TextSpan._set_text_format is orig_fmt
 
 
-# ---------------------------------------------------------------- birebir düzen
+# ---------------------------------------------------------------- exact layout
 
 def test_exact_layout_symbols(tmp_path):
     from riffle import fixed_layout
@@ -147,13 +147,13 @@ def test_exact_layout_symbols(tmp_path):
     fixed_layout.convert(_mu_pdf(tmp_path / "mu.pdf"), out)
     xml = zipfile.ZipFile(out).read("word/document.xml").decode("utf-8")
     assert xml.count("μ") == 2 and "\x01" not in xml
-    # μ, Word'de olmayan "Mathematical Pi" fontuyla değil, yanındaki metin fontuyla yazılır
+    # μ is written with the neighbouring text font, not the "Mathematical Pi" font Word lacks
     assert "Mathematical" not in xml
 
 
 def test_exact_layout_line_pitch(tmp_path):
-    """Satır kutusu satır aralığından büyükse (μ'lü satırlar) satırlar birikerek aşağı kaymamalı:
-    her satırın yüksekliği PDF'teki satır aralığı olmalı."""
+    """If the line box is bigger than the line spacing (lines with μ), lines must not drift down cumulatively:
+    each line's height must be the line spacing in the PDF."""
     from riffle import fixed_layout
     d = pymupdf.open()
     p = d.new_page()
@@ -161,7 +161,7 @@ def test_exact_layout_line_pitch(tmp_path):
         _text(p, (72, 100 + i * 11.0), f"Satır {i} ÇĞÜŞİÖ çalışma güçlü yazı", )
     d.save(tmp_path / "pitch.pdf")
     lines = [ln for b in fixed_layout._lines(pymupdf.open(tmp_path / "pitch.pdf")[0]) for ln in b]
-    assert lines[0][0].height > 11.0                    # kutu aralıktan büyük: hatayı tetikleyen durum
+    assert lines[0][0].height > 11.0                    # box bigger than the spacing: the case that triggered the bug
     out = tmp_path / "pitch.docx"
     fixed_layout.convert(tmp_path / "pitch.pdf", out)
     xml = zipfile.ZipFile(out).read("word/document.xml").decode("utf-8")
@@ -169,7 +169,7 @@ def test_exact_layout_line_pitch(tmp_path):
     assert heights[:5] == [220] * 5                     # 11 pt × 20
 
 
-# ---------------------------------------------------------------- OCR: el yazısı
+# ---------------------------------------------------------------- OCR: handwriting
 
 def test_ocr_layer_skips_unreliable_handwriting():
     from riffle import ocr

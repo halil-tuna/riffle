@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tek klasörlük (.exe + kütüphaneler) paket üretir: PyInstaller.
+"""Builds a one-folder package (.exe + libraries) with PyInstaller.
 
     pip install pyinstaller
     python packaging/build_exe.py          # → dist/Riffle/Riffle(.exe)
 
-Windows'ta çıktı Inno Setup ile kurulum dosyasına çevrilir (packaging/installer.iss).
-Linux'ta da çalışır (test için).
+On Windows the output is turned into an installer with Inno Setup (packaging/installer.iss).
+Also works on Linux (for testing).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ NAME = "Riffle"
 
 
 def make_icon(path: Path) -> Path:
-    """Riffle simgesi: yelpaze gibi açılmış (riffle edilen) üç sayfa."""
+    """Riffle icon: three pages fanned out (riffled)."""
     from PIL import Image, ImageDraw
     S = 256
     im = Image.new("RGBA", (S, S), (0, 0, 0, 0))
@@ -38,12 +38,12 @@ def make_icon(path: Path) -> Path:
         im.alpha_composite(layer)
     path.parent.mkdir(parents=True, exist_ok=True)
     im.save(path, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-    im.resize((64, 64), Image.LANCZOS).save(path.with_suffix(".png"))     # pencere simgesi (tkinter)
+    im.resize((64, 64), Image.LANCZOS).save(path.with_suffix(".png"))     # window icon (tkinter)
     return path
 
 
 def main() -> int:
-    for stream in (sys.stdout, sys.stderr):   # Windows'ta boruya yazarken cp1252: ✔ ve Türkçe harfler patlamasın
+    for stream in (sys.stdout, sys.stderr):   # cp1252 when writing to a pipe on Windows: keep ✔ and Turkish letters from crashing
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError, OSError):
@@ -51,7 +51,7 @@ def main() -> int:
     try:
         import PyInstaller.__main__ as pyi
     except ImportError:
-        print("Önce: pip install pyinstaller")
+        print("First: pip install pyinstaller")
         return 1
     build = ROOT / "build"
     build.mkdir(exist_ok=True)
@@ -63,24 +63,24 @@ def main() -> int:
         str(ROOT / "run.pyw"),
         "--name", NAME,
         "--noconfirm", "--clean",
-        "--windowed",                        # konsol penceresi açılmasın
+        "--windowed",                        # no console window
         "--icon", str(icon),
         "--paths", str(ROOT),
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(build / "pyinstaller"),
         "--specpath", str(build),
-        "--collect-submodules", "riffle",    # araçlar çağrı anında importlib ile yükleniyor
+        "--collect-submodules", "riffle",    # the tools are loaded with importlib at call time
         "--hidden-import", "install",        # --install-menu / --uninstall-menu
         "--collect-all", "pymupdf",
         "--collect-all", "pymupdf4llm",
         "--collect-submodules", "pdf2docx",
-        "--collect-data", "pptx",            # python-pptx şablonu
+        "--collect-data", "pptx",            # python-pptx template
         "--collect-all", "pillow_heif",
-        "--collect-all", "tkinterdnd2",      # tkdnd ikili dosyaları
-        "--add-data", f"{ROOT / 'riffle' / 'fonts'}{sep}riffle/fonts",   # gömülü yazı tipi (OFL)
-        "--add-data", f"{ROOT / 'riffle' / 'assets'}{sep}riffle/assets",  # simge (pencere + sağ tık menüsü)
-        "--collect-data", "sv_ttk",          # Windows 11 teması (Tcl + görseller)
-        "--collect-data", "docxcompose",     # Word birleştirmenin XML şablonları
+        "--collect-all", "tkinterdnd2",      # tkdnd binaries
+        "--add-data", f"{ROOT / 'riffle' / 'fonts'}{sep}riffle/fonts",   # bundled font (OFL)
+        "--add-data", f"{ROOT / 'riffle' / 'assets'}{sep}riffle/assets",  # icon (window + right-click menu)
+        "--collect-data", "sv_ttk",          # Windows 11 theme (Tcl + images)
+        "--collect-data", "docxcompose",     # XML templates for Word merging
         "--add-data", f"{ROOT / 'LICENSE'}{sep}.",
         "--add-data", f"{ROOT / 'README.md'}{sep}.",
         "--add-data", f"{ROOT / 'README.tr.md'}{sep}.",
@@ -90,12 +90,12 @@ def main() -> int:
     pyi.run(args)
     out = ROOT / "dist" / NAME
     saved = prune(out)
-    print(f"✔ Paket: {out}  (gereksiz dosyalar: {saved / 1e6:.0f} MB atıldı)")
+    print(f"✔ Package: {out}  (unused files: {saved / 1e6:.0f} MB removed)")
     return 0
 
 
-# Pakete giren ama hiç kullanılmayan dosyalar. Kullanılan sayfa düzeni modelleri, bütün test
-# belgelerinde PDF → Markdown çalıştırılıp onnxruntime'ın yüklediği dosyalar izlenerek bulundu.
+# Files that end up in the package but are never used. The page layout models that are used were found by
+# running PDF → Markdown on all test documents and tracing which files onnxruntime loaded.
 USED_LAYOUT_MODELS = {"feature_imf1.onnx", "layout_rf2.4.1+imf1.onnx", "table_grid_model_v4_ep.onnx"}
 
 
@@ -108,18 +108,18 @@ def _platform_tag() -> str:
 
 
 def prune(out: Path) -> int:
-    """PyInstaller çıktısından kullanılmayanları siler, kazanılan baytı döndürür."""
+    """Deletes unused files from the PyInstaller output, returns the bytes saved."""
     internal = out / "_internal"
     doomed: list[Path] = []
-    doomed += internal.glob("cv2/opencv_videoio_ffmpeg*")       # OpenCV video eklentisi (~41 MB, Windows)
-    doomed += internal.glob("pymupdf/mupdf-devel")              # C başlıkları / .lib (derleme için)
+    doomed += internal.glob("cv2/opencv_videoio_ffmpeg*")       # OpenCV video plugin (~41 MB, Windows)
+    doomed += internal.glob("pymupdf/mupdf-devel")              # C headers / .lib (for compiling)
     models = internal / "pymupdf" / "layout" / "resources" / "onnx"
     doomed += [f for f in models.glob("*.onnx") if f.name not in USED_LAYOUT_MODELS]
     tag = _platform_tag()
-    doomed += [d for d in internal.glob("tkinterdnd2/tkdnd/*")    # başka işletim sistemlerinin tkdnd'si
+    doomed += [d for d in internal.glob("tkinterdnd2/tkdnd/*")    # tkdnd for other operating systems
                if d.is_dir() and not d.name.startswith(tag)]
-    doomed += internal.rglob("*.pyi")                           # tip ipuçları
-    # babel (docxcompose'un tarih biçimleri için): yalnızca Türkçe, İngilizce ve kök dil verisi kalsın
+    doomed += internal.rglob("*.pyi")                           # type hints
+    # babel (for docxcompose's date formats): keep only Turkish, English and root locale data
     doomed += [f for f in internal.glob("babel/locale-data/*.dat")
                if not f.name.split(".")[0].split("_")[0] in ("root", "tr", "en")]
     saved = 0

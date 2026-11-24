@@ -1,12 +1,12 @@
-"""Giriş noktası.
+"""Entry point.
 
-Kullanım:
-    python run.pyw <işlem> <dosya1> [dosya2 ...]
-    python run.pyw --list            # işlemleri listele
-    python run.pyw --settings        # ayarlar penceresi
-    Riffle.exe --install-menu / --uninstall-menu / --check   (paketlenmiş sürüm)
+Usage:
+    python run.pyw <action> <file1> [file2 ...]
+    python run.pyw --list            # list the actions
+    python run.pyw --settings        # settings window
+    Riffle.exe --install-menu / --uninstall-menu / --check   (packaged version)
 
-Sağ tık menüsü bu komutu çağırır.
+The right-click menu calls this command.
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ warnings.filterwarnings("ignore")
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
-    # pythonw ile çalışırken stdout/stderr yok; print'ler patlamasın
+    # no stdout/stderr when running under pythonw; keep prints from crashing
     if sys.stdout is None:
         import io
         sys.stdout = sys.stderr = io.StringIO()
-    # Windows'ta çıktı bir boruya giderken (komut satırı, başka program) kodlama cp1252 oluyor ve Türkçe
-    # harfli ilk print UnicodeEncodeError ile işi yarıda kesiyordu ('Tamamlandı', 'Bilinmeyen işlem')
+    # On Windows, when output goes to a pipe (command line, another program) the encoding is cp1252 and the
+    # first print with Turkish letters aborted the job with UnicodeEncodeError ('Tamamlandı', 'Bilinmeyen işlem')
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__)
         return 0
     if argv[0] in ("--install-menu", "--uninstall-menu", "--check"):
-        # .exe kurulumu (Inno Setup) bu bayraklarla çağırır; kaynak kurulumda install.py aynısını yapar
+        # the .exe installer (Inno Setup) calls these flags; install.py does the same for a source install
         import install
         if argv[0] == "--check":
             install.check_optional()
@@ -72,11 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     from .collect import collect
     collected = collect(action_id, raw_paths)
     if collected is None:
-        return 0  # başka bir süreç bu işi topluyor
+        return 0  # another process is collecting this job
 
     from . import ui
 
-    # Desteklenmeyen uzantıları ayıkla (ör. birleştirirken araya .docx karışırsa)
+    # Filter out unsupported extensions (e.g. a .docx mixed in while merging)
     paths, skipped = [], []
     from .actions import accepts
     for p in map(Path, collected):
@@ -90,15 +90,15 @@ def main(argv: list[str] | None = None) -> int:
 
     kwargs = dict(action.kwargs)
     if action.order and len(paths) > 1:
-        # önce küçük, hızlı dosya sırası penceresi; sayfalar ancak istenirse açılır
+        # a small, fast file order window first; the pages are opened only if asked
         from .actions import sorted_by_name
         ok_text = T("Birleştir") if action.quick or action.id in ("merge", "wordmerge") else T("Tamam")
         answer = ui.ask_order(sorted_by_name(paths), T(action.label), T(action.order), ok_text,
-                              allow_pages=action.id != "wordmerge")     # Word birleştirme PDF'e gitmesin
+                              allow_pages=action.id != "wordmerge")     # Word merging should not go to PDF
         if answer is None:
-            return 1                     # İptal
+            return 1                     # Cancel
         mode, paths = answer
-        if mode == "organize":           # "Sayfa sayfa düzenle…": düzenleyici, seçilen sırayla
+        if mode == "organize":           # "Edit page by page…": the organizer, in the chosen order
             from .tools import organize
             try:
                 organize(paths, print)
@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             return 0
         kwargs["ordered"] = True
-        if action.quick:                 # düzenleyici yerine doğrudan birleştir
+        if action.quick:                 # merge directly instead of the organizer
             action = replace(action, func=action.quick, interactive=False, batch=True)
     if action.needs_password:
         pw = ui.ask_password(confirm=action.needs_password == "new")
@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         _apply_output_setting(paths, settings, ui)
 
     if action.interactive:
-        # kendi penceresini açar; sonuçları kendisi gösterir
+        # opens its own window; shows the results itself
         try:
             outputs = action.func(paths, print, **kwargs)
         except ConversionError as e:
@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
                 outputs += outs
                 errors += errs
             else:
-                # Toplu işlemler (birleştir, görsel→PDF) tek çağrıda, diğerleri dosya dosya
+                # Batch actions (merge, image → PDF) in one call, the rest file by file
                 batches = [paths] if action.batch else [[p] for p in paths]
                 for batch in batches:
                     parallel.check_cancel()
@@ -175,13 +175,13 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-# Zaten kendi içinde paralel çalışanlar (OCR sayfaları iş parçacıklarına böler) ya da tek LibreOffice
-# çağrısında toplu işleyenler: süreç havuzuna sokma.
+# Actions that are already parallel inside (OCR splits pages over threads) or that batch everything in
+# one LibreOffice call: keep them out of the process pool.
 NO_PARALLEL = {"ocr", "office2pdf", "pdfa"}
 
 
 def _apply_output_setting(paths, settings, ui) -> None:
-    """Ayar 'Masaüstüne / şu klasöre / sor' ise çıktıları oraya yönlendirir (kaynağın yanı yerine)."""
+    """If the setting is 'Desktop / this folder / ask', redirects the outputs there (instead of next to the source)."""
     try:
         target = settings.output_target(ask=ui.ask_folder)
     except Exception:
@@ -190,14 +190,14 @@ def _apply_output_setting(paths, settings, ui) -> None:
         return
     from . import actions
     for p in paths:
-        try:                                           # klasör işlemleri de çıktıyı üst klasöre yazar
+        try:                                           # folder actions also write their output to the parent folder
             actions.OUTPUT_REDIRECT[Path(p).resolve().parent] = target
         except OSError:
             pass
 
 
 def _count_use(action_id: str, settings) -> None:
-    """Kullanım sayacı; sık kullanılanlar değiştiyse menüyü yenile (en üste çıkar)."""
+    """Usage counter; refresh the menu if the favourites changed (moved to the top)."""
     if action_id == "settings":
         return
     import os

@@ -1,9 +1,9 @@
-"""README ve görünüm kontrolü için pencere ekran görüntüleri (Linux, sanal ekranda).
+"""Window screenshots for the README and visual checks (Linux, on a virtual display).
 
-    xvfb-run -a -s "-screen 0 1600x1000x24" python packaging/screenshots.py docs/screenshots [--dark]
+    xvfb-run -a -s "-screen 0 1600x1000x24" python packaging/screenshots.py docs/screenshots [--dark] [--en]
 
-Gerekenler: tkinter, xdotool, ImageMagick (import). Her pencere gerçek programla açılır,
-xdotool ile bulunur ve yalnızca o pencerenin görüntüsü alınır.
+Requires: tkinter, xdotool, ImageMagick (import). Every window is opened by the real program,
+found with xdotool and only that window is captured.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ L = {
 
 
 def _sample_pdfs(work: Path, lang: str = "tr") -> dict:
-    """Yapay örnek belgeler (README görüntüleri herkese açık: gerçek kişi/kurum bilgisi yok)."""
+    """Synthetic sample documents (README images are public: no real people or institutions)."""
     import pymupdf
     c = L[lang]
     h, para = c["h"], c["para"]
@@ -83,7 +83,7 @@ def _sample_pdfs(work: Path, lang: str = "tr") -> dict:
                                                                         for i in range(2, 7)])
     out["Ders notu.pdf"] = _html_pdf(work / c["notes"], [
         f"<h1>{h[11].format(i)}</h1><p>{para * 7}</p>" for i in range(1, 9)])
-    # doldurulabilir form
+    # fillable form
     form = work / c["form"]
     d = pymupdf.open()
     pg = d.new_page()

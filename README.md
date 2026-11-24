@@ -138,6 +138,8 @@ Adding a tool: a function in `tools.py` / `docops.py` plus one line in `ACTIONS`
 Every user-visible string is wrapped as `T("…")` with the Turkish text as the key; `riffle/i18n_en.py` maps it
 to English. `python tests/i18n_scan.py` lists strings without a translation, and the test suite fails on
 untranslated or unwrapped UI strings, mismatched placeholders, or Turkish characters in the English menus.
+Code comments and docstrings are in English; only the `T("…")` keys (and a few Turkish examples, e.g. for
+the CSV and search heuristics) are Turkish.
 
 ## Known limits
 

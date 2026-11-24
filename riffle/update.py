@@ -1,7 +1,7 @@
-"""Yeni sürüm bildirimi: haftada en fazla bir kez GitHub'daki son sürüme bakar.
+"""New version notice: checks the latest release on GitHub at most once a week.
 
-Yalnızca sürüm numarasını sorar (api.github.com), hiçbir dosya ya da bilgi göndermez.
-Ayarlar'dan kapatılabilir; RIFFLE_NO_UPDATE_CHECK=1 ile (testler) hiç ağa çıkmaz.
+It only asks for the version number (api.github.com) and sends no files or information.
+Can be turned off in Settings; with RIFFLE_NO_UPDATE_CHECK=1 (tests) it never goes online.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def enabled() -> bool:
 
 
 def fetch(timeout: float = 4.0) -> str | None:
-    """GitHub'daki son sürümün numarası (ör. '0.9.1'); ağ yoksa None."""
+    """Number of the latest release on GitHub (e.g. '0.9.1'); None without network."""
     import urllib.request
     req = urllib.request.Request(API, headers={"Accept": "application/vnd.github+json",
                                                "User-Agent": f"Riffle/{__version__}"})
@@ -59,7 +59,7 @@ def fetch(timeout: float = 4.0) -> str | None:
 
 
 def check(force: bool = False) -> str | None:
-    """Daha yeni bir sürüm varsa numarasını döndürür. Son denetim bir haftadan eskiyse ağa çıkar."""
+    """Returns the newer version number if there is one. Goes online only if the last check is over a week old."""
     if not force and not enabled():
         return None
     state = _load()

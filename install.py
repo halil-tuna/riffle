@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Riffle kurulum / kaldırma.
+"""Riffle install / uninstall.
 
-    python install.py              # kur (Windows veya Linux Mint/Nemo)
-    python install.py --uninstall  # sağ tık menüsünü kaldır
-    python install.py --menu-only  # kütüphaneleri atla, sadece menüyü yeniden yaz
+    python install.py              # install (Windows or Linux Mint/Nemo)
+    python install.py --uninstall  # remove the right-click menu
+    python install.py --menu-only  # skip the libraries, only rewrite the menu
 
-Yönetici yetkisi GEREKMEZ: Windows'ta HKEY_CURRENT_USER, Linux'ta ~/.local kullanılır.
+NO admin rights needed: HKEY_CURRENT_USER on Windows, ~/.local on Linux.
 """
 
 from __future__ import annotations
@@ -25,18 +25,18 @@ from riffle.i18n import T  # noqa: E402
 from riffle.actions import ACTIONS, FOLDER, all_extensions, actions_for_extension  # noqa: E402
 
 IS_WIN = sys.platform == "win32"
-FROZEN = bool(getattr(sys, "frozen", False))      # PyInstaller ile paketlenmiş .exe
+FROZEN = bool(getattr(sys, "frozen", False))      # .exe packaged with PyInstaller
 
 
 def command_prefix(gui: bool = True) -> str:
-    """Sağ tık komutunun başı: .exe kurulumunda programın kendisi, kaynak kurulumda python + run.pyw."""
+    """Start of the right-click command: the program itself for an .exe install, python + run.pyw for a source install."""
     if FROZEN:
         return f'"{sys.executable}"'
     return f'"{venv_python(gui)}" "{RUN}"'
 
 
 # --------------------------------------------------------------------------
-# Sanal ortam + kütüphaneler
+# Virtual environment + libraries
 # --------------------------------------------------------------------------
 
 def venv_python(gui: bool = False) -> Path:
@@ -50,7 +50,7 @@ def setup_venv() -> None:
         print(T("» Sanal ortam oluşturuluyor (.venv)…"))
         args = [sys.executable, "-m", "venv", str(VENV)]
         if not IS_WIN:
-            args.insert(3, "--system-site-packages")  # apt'den gelen tkinter görünsün
+            args.insert(3, "--system-site-packages")  # make the tkinter from apt visible
         subprocess.check_call(args)
     print(T("» Kütüphaneler kuruluyor (ilk seferde 1-2 dk)…"))
     py = str(venv_python())
@@ -64,11 +64,11 @@ def setup_venv() -> None:
 
 
 # --------------------------------------------------------------------------
-# Windows: Gezgin sağ tık → "Riffle" alt menüsü
+# Windows: Explorer right-click → "Riffle" submenu
 # --------------------------------------------------------------------------
 
 WIN_BASE = r"Software\Classes\SystemFileAssociations\.{ext}\shell\Riffle"
-# klasörün üstüne sağ tık (%1) ve klasörün içinde boş alana sağ tık (%V)
+# right-click on a folder (%1) and on empty space inside a folder (%V)
 WIN_FOLDER_BASES = [(r"Software\Classes\Directory\shell\Riffle", "%1"),
                     (r"Software\Classes\Directory\Background\shell\Riffle", "%V")]
 
@@ -78,7 +78,7 @@ def _win_delete_tree(root, path: str) -> None:
     try:
         with winreg.OpenKey(root, path, 0, winreg.KEY_ALL_ACCESS) as k:
             children, i = [], 0
-            while True:  # önce listele, sonra sil (silme sırasında indeks kaymasın)
+            while True:  # list first, then delete (so indexes don't shift while deleting)
                 try:
                     children.append(winreg.EnumKey(k, i))
                     i += 1
@@ -100,14 +100,14 @@ def _win_refresh_shell() -> None:
 
 
 def menu_tree(ext: str) -> list:
-    """Bir uzantının sağ tık menüsü: [(grup_adı | None, [işlemler])].
+    """Right-click menu of an extension: [(group_name | None, [actions])].
 
-    Çok işlem varsa gruplara ayrılır (Windows'ta iç içe alt menü);
-    az işlem varsa (Office, görseller) tek düz liste.
+    With many actions it is split into groups (nested submenus on Windows);
+    with few actions (Office, images) a single flat list.
     """
     hidden, favs = _menu_prefs()
     acts = [a for a in actions_for_extension(ext) if a.id not in hidden]
-    tail = [a for a in acts if a.id == "settings"]               # "Ayarlar…" hep en sonda
+    tail = [a for a in acts if a.id == "settings"]               # "Settings…" always last
     acts = [a for a in acts if a.id != "settings"]
     top = sorted((a for a in acts if a.id in favs), key=lambda a: favs.index(a.id))
     rest = [a for a in acts if a.id not in favs]
@@ -127,7 +127,7 @@ def menu_tree(ext: str) -> list:
 
 
 def _menu_prefs() -> tuple[set, list]:
-    """Ayarlar: gizlenen işlemler ve en üste çıkacak sık kullanılanlar. Ayar okunamazsa boş."""
+    """Settings: hidden actions and favourites that go to the top. Empty if the settings can't be read."""
     try:
         from riffle import settings
         s = settings.load()
@@ -139,16 +139,16 @@ def _menu_prefs() -> tuple[set, list]:
 def _win_item(winreg, HK, key: str, action, prefix, arg: str = "%1") -> None:
     with winreg.CreateKey(HK, key) as k:
         winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, T(action.label))
-        # 15'ten fazla dosya seçilince de menü görünsün
+        # show the menu even when more than 15 files are selected
         winreg.SetValueEx(k, "MultiSelectModel", 0, winreg.REG_SZ, "Player")
-        if action.id == "settings":                     # "Ayarlar…" öncesine ayırıcı çizgi
+        if action.id == "settings":                     # separator line before "Settings…"
             winreg.SetValueEx(k, "CommandFlags", 0, winreg.REG_DWORD, 0x20)
     with winreg.CreateKey(HK, key + "\\command") as k:
         winreg.SetValueEx(k, "", 0, winreg.REG_SZ, f'{prefix} {action.id} "{arg}"')
 
 
 def _win_icon(winreg, key) -> None:
-    """Sağ tık menüsünde 'Riffle' satırının yanında simge."""
+    """Icon next to the 'Riffle' entry in the right-click menu."""
     from riffle.theme import ICON_ICO
     if ICON_ICO.exists():
         winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, str(ICON_ICO))
@@ -168,24 +168,24 @@ def _install_folder_menus(winreg, HK, prefix) -> None:
             _win_item(winreg, HK, f"{base}\\shell\\{i:02d}_{action.id}", action, prefix, arg)
 
 
-# Windows Gezgini kayıt defterindeki bir "sabit" alt menü ağacında en fazla 16 satır gösteriyor:
-# alt menü başlıkları da sayılıyor, sığmayanlar sessizce boş kalıyor (PDF menüsünde "Düzenle" boş,
-# "Ayarlar" yoktu). Bu yüzden PDF gibi kalabalık menüler, her biri 16 satıra sığan birkaç üst menüye bölünür.
+# Windows Explorer shows at most 16 rows in a "static" submenu tree in the registry:
+# submenu headings count too, and what doesn't fit is silently left empty (in the PDF menu "Edit" was empty,
+# "Settings" was missing). So crowded menus like PDF are split into several top-level entries that each fit 16 rows.
 WIN_MAX_ITEMS = 16
 WIN_EXTRA = 8                                  # Riffle_2 … _9
 
 
 def win_cascades(ext: str) -> list:
-    """[(başlık, [(grup | None, [işlemler])])] — her başlık ayrı bir sağ tık girdisi, ≤16 satır."""
+    """[(title, [(group | None, [actions])])] — each title is a separate right-click entry, ≤16 rows."""
     tree = menu_tree(ext)
     flat_top = [a for g, acts in tree if g is None for a in acts]
     groups = [(g, acts) for g, acts in tree if g is not None]
-    if not groups:                                          # az işlem: tek düz menü
+    if not groups:                                          # few actions: one flat menu
         return [(APP_NAME, [(None, flat_top[:WIN_MAX_ITEMS])])]
     tail = [a for a in flat_top if a.id == "settings"]
     head = [a for a in flat_top if a.id != "settings"][:WIN_MAX_ITEMS - len(tail)]
     out = [(APP_NAME, [(None, head + tail)])]
-    # büyük grupları 16'lık parçalara böl
+    # split big groups into chunks of 16
     chunks = []
     for g, acts in groups:
         for k in range(0, len(acts), WIN_MAX_ITEMS):
@@ -193,7 +193,7 @@ def win_cascades(ext: str) -> list:
             chunks.append((g if k == 0 else f"{g} (devam)", part))
     cur, cost = [], 0
     for g, acts in chunks:
-        c = 1 + len(acts)                                    # grup başlığı + içi
+        c = 1 + len(acts)                                    # group heading + contents
         if cur and cost + c > WIN_MAX_ITEMS:
             out.append(_cascade(cur))
             cur, cost = [], 0
@@ -201,11 +201,11 @@ def win_cascades(ext: str) -> list:
         cost += c
     if cur:
         out.append(_cascade(cur))
-    # ana menüde yer kaldıysa küçük grupları oraya al (sağ tık menüsünde daha az satır)
+    # if there is room in the main menu, move small groups there (fewer rows in the right-click menu)
     main_cost = len(head) + len(tail)
     for k in range(len(out) - 1, 0, -1):
         title, nodes = out[k]
-        if nodes[0][0] is None:                            # tek grup, düz yazılmış: başlığını geri koy
+        if nodes[0][0] is None:                            # single group written flat: put its heading back
             nodes = [(title.split(" · ", 1)[1], nodes[0][1])]
         cost = sum(1 + len(a) for _, a in nodes)
         if main_cost + cost <= WIN_MAX_ITEMS:
@@ -218,7 +218,7 @@ def win_cascades(ext: str) -> list:
 
 
 def _cascade(groups: list) -> tuple:
-    """Tek grup → düz menü ('Riffle · Dönüştür'); birden çok grup → iç içe."""
+    """Single group → flat menu ('Riffle · Convert'); several groups → nested."""
     title = f"{APP_NAME} · " + ", ".join(T(g) for g, _ in groups)
     if len(groups) == 1:
         return title, [(None, groups[0][1])]
@@ -236,7 +236,7 @@ def install_windows() -> None:
     for ext in all_extensions():
         keys = _win_cascade_keys(WIN_BASE.format(ext=ext))
         for k in keys:
-            _win_delete_tree(HK, k)  # eski kurulumu temizle
+            _win_delete_tree(HK, k)  # clean up the old installation
         for base, (title, tree) in zip(keys, win_cascades(ext)):
             with winreg.CreateKey(HK, base) as k:
                 winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, title)
@@ -321,7 +321,7 @@ def uninstall_linux() -> None:
 # --------------------------------------------------------------------------
 
 def check_optional() -> None:
-    """İsteğe bağlı dış programlar: yoksa ne kaybedildiğini ve nasıl kurulacağını söyle."""
+    """Optional external programs: if missing, say what is lost and how to install them."""
     print(T("» Ek bileşenler:"))
     from riffle.actions import _find_soffice
     if _find_soffice():
@@ -345,7 +345,7 @@ def check_optional() -> None:
 
 
 def main() -> None:
-    for stream in (sys.stdout, sys.stderr):   # Windows'ta boruya yazarken cp1252: ✔ ve Türkçe harfler patlamasın
+    for stream in (sys.stdout, sys.stderr):   # cp1252 when writing to a pipe on Windows: keep ✔ and Turkish letters from crashing
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError, OSError):
@@ -360,7 +360,7 @@ def main() -> None:
     if "--menu-only" not in args:
         setup_venv()
     install_windows() if IS_WIN else install_linux()
-    # Bileşen kontrolü PyMuPDF ister: kütüphanelerin kurulu olduğu sanal ortamda çalıştır
+    # The component check needs PyMuPDF: run it in the virtual environment where the libraries are installed
     py = venv_python()
     if py.exists():
         subprocess.run([str(py), str(Path(__file__).resolve()), "--check"])
