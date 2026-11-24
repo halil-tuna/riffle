@@ -1,11 +1,12 @@
 """PDF → Word: two-column detection (automatic exact layout), flowing text mode, horizontal separator lines."""
 
 import re
+import shutil
 import zipfile
 
 import pymupdf
 
-from conftest import _text, noop
+from conftest import _text, needs_soffice, noop
 from riffle import reflow
 from riffle.actions import ACTIONS, pdf_to_word
 
@@ -131,3 +132,63 @@ def test_word_mixed_table_and_rules_untouched_in_cells(tmp_path):
     xml = _xml(out)
     for tbl in re.findall(r"<w:tbl>.*?</w:tbl>", xml, re.S):
         assert "<w:pBdr>" not in tbl
+
+
+def _drawing_page(doc):
+    p = doc.new_page()
+    for i in range(15):
+        p.draw_line((60 + i * 25, 120), (320 + i * 12, 640), color=(0, 0, 1), width=2)
+    p.draw_circle((300, 360), 90, color=(1, 0, 0), width=3)
+
+
+def test_textless_pages_pinned_to_page_corner(tmp_path):
+    """Pages without text become a page image; it must sit at the page corner (LibreOffice shifted
+    an inline full-page image ~9 pt right) and every PDF page must stay one Word page."""
+    src = tmp_path / "karisik.pdf"
+    d = pymupdf.open()
+    t = d.new_page()
+    _text(t, (72, 100), "Page one title", size=14)
+    _drawing_page(d)
+    _drawing_page(d)
+    t = d.new_page()
+    _text(t, (72, 100), "Page four title", size=14)
+    d.save(src)
+    out = pdf_to_word([src], noop)[0]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert "<wp:inline" not in xml or xml.count("<wp:anchor") >= 2
+    anchors = re.findall(r'<wp:anchor[^>]*behindDoc="1".*?</wp:anchor>', xml, re.S)
+    assert len(anchors) == 2
+    for a in anchors:
+        assert re.search(r'relativeFrom="page"><wp:posOffset>0<', a)
+        assert 'xmlns:a=' in a or 'xmlns:a=' in xml[:2000]
+    from lxml import etree
+    etree.fromstring(xml.encode())  # still well-formed (namespaces carried over)
+    body = xml[xml.find("<w:body>"):]
+    assert body.find("Page one title") < body.find("<wp:anchor") < body.find("Page four title")
+
+
+@needs_soffice
+def test_textless_pages_render_in_place(tmp_path):
+    """Rendered: 4 PDF pages → 4 pages, page images at (0, 0), text pages keep their text."""
+    import subprocess
+    src = tmp_path / "karisik.pdf"
+    d = pymupdf.open()
+    t = d.new_page()
+    _text(t, (72, 100), "Page one title", size=14)
+    _drawing_page(d)
+    _drawing_page(d)
+    t = d.new_page()
+    _text(t, (72, 100), "Page four title", size=14)
+    d.save(src)
+    out = pdf_to_word([src], noop)[0]
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", str(tmp_path / "r"), str(out)],
+                   check=True, capture_output=True, timeout=180)
+    with pymupdf.open(tmp_path / "r" / (out.stem + ".pdf")) as r:
+        assert len(r) == 4
+        assert "Page one title" in r[0].get_text() and "Page four title" in r[3].get_text()
+        for i in (1, 2):
+            boxes = [info["bbox"] for info in r[i].get_image_info()]
+            assert len(boxes) == 1
+            assert abs(boxes[0][0]) < 1 and abs(boxes[0][1]) < 1
+            assert abs(boxes[0][2] - r[i].rect.width) < 1

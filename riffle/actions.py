@@ -628,7 +628,103 @@ def _fix_layout_xml(xml: str, info=None) -> str:
     # 5) Lost horizontal separator lines → paragraph borders
     if info is not None and getattr(info, "rules", None):
         xml = _apply_rules(xml, info.rules)
+    # 6) Pages turned into a single image (handwriting, drawings): pin them to the page corner
+    xml = _pin_page_images(xml)
     return xml
+
+
+_FULL_PAGE_PARA = re.compile(
+    r'<w:p>(?:(?!<w:p[ >]|</w:p>).)*?<wp:inline[^>]*><wp:extent cx="(\d+)" cy="(\d+)"/>'
+    r'(?:(?!<w:p[ >]|</w:p>).)*?</wp:inline>(?:(?!<w:p[ >]|</w:p>).)*?</w:p>', re.S)
+_SPACER_PARA = ('<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:before="0" w:after="0" w:line="20" '
+                'w:lineRule="exact"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr></w:p>')
+
+
+def _add_page_break_before(para: str) -> str:
+    """Adds <w:pageBreakBefore/> to a paragraph, in schema order (after pStyle/keepNext/keepLines)."""
+    ppr_end = para.find("</w:pPr>")
+    if ppr_end != -1 and "<w:pageBreakBefore" in para[:ppr_end]:
+        return para
+    m = re.match(r'<w:p(?: [^>]*)?>', para)
+    head, rest = para[:m.end()], para[m.end():]
+    if not rest.startswith("<w:pPr>"):
+        return f"{head}<w:pPr><w:pageBreakBefore/></w:pPr>{rest}"
+    pos = len("<w:pPr>")
+    for tag in ("pStyle", "keepNext", "keepLines"):
+        t = re.match(rf'<w:{tag}\b[^>]*/>', rest[pos:])
+        if t:
+            pos += t.end()
+    return f"{head}{rest[:pos]}<w:pageBreakBefore/>{rest[pos:]}"
+
+
+def _pin_page_images(xml: str) -> str:
+    """pdf2docx puts a page that became an image (see _prepare_pdf) inline, as large as the page,
+    in a section with zero margins. LibreOffice shifts such an image right (~9 pt) and pushes its
+    edge off the page. Anchor it to the page corner behind the text instead, and keep each image
+    on its own page with explicit page breaks (an anchored image no longer fills the page)."""
+    sizes = {(int(w), int(h)) for w, h in re.findall(r'<w:pgSz w:w="(\d+)" w:h="(\d+)"', xml)}
+    if not sizes:
+        return xml
+
+    def full_page(cx: int, cy: int) -> bool:
+        w, h = cx / 635, cy / 635  # EMU → twips
+        return any(abs(w - pw) <= 0.015 * pw and abs(h - ph) <= 0.015 * ph for pw, ph in sizes)
+
+    hits = [m for m in _FULL_PAGE_PARA.finditer(xml)
+            if full_page(int(m[1]), int(m[2])) and "<w:t" not in m[0].replace("<w:tab", "")]
+    for m in reversed(hits):
+        para = m[0]
+        # keep the inline element's own attributes: pdf2docx declares the a:/pic: namespaces there
+        para = re.sub(r'<wp:inline((?: [^>]*)?)>(<wp:extent [^>]*/>)(<wp:effectExtent [^>]*/>)?',
+                      lambda i: '<wp:anchor' + re.sub(r' dist[TBLR]="[^"]*"', '', i[1]) +
+                      ' distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="1" '
+                      'behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
+                      '<wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH>'
+                      '<wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV>'
+                      + i[2] + '<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>', para, count=1)
+        para = para.replace("</wp:inline>", "</wp:anchor>", 1)
+        # the now empty paragraph should take (almost) no room
+        para = re.sub(r'<w:spacing [^>]*/>', '<w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>',
+                      para, count=1)
+        ends_section = "<w:sectPr" in para
+        # page break before, unless this is the first thing on a page anyway
+        before = xml[:m.start()]
+        prev_start = max(before.rfind("<w:p>"), before.rfind("<w:p "))
+        first = before.rstrip().endswith("<w:body>")
+        after_section = before.endswith("</w:p>") and prev_start != -1 and "<w:sectPr" in before[prev_start:]
+        if not first and not after_section:
+            para = _add_page_break_before(para)
+        # whatever follows must start on the next page
+        after = xml[m.end():]
+        if ends_section:
+            after = _break_after_section(after, para)
+        else:
+            after = _break_next(after)
+        xml = before + para + after
+    return xml
+
+
+def _break_next(after: str) -> str:
+    """Makes the body element at the start of 'after' begin on a new page."""
+    if after.startswith("<w:tbl>"):
+        return _SPACER_PARA + after
+    if not re.match(r'<w:p[ >]', after) or _FULL_PAGE_PARA.match(after):
+        return after  # end of the body, or another page image (gets its own break)
+    end = after.find("</w:p>") + len("</w:p>")
+    para = after[:end]
+    if "<w:sectPr" in para and "<w:t" not in para.replace("<w:tab", "") and "<w:drawing" not in para:
+        # empty section-break paragraph: it may stay on the image page, the break goes after it
+        return para + _break_after_section(after[end:], para)
+    return _add_page_break_before(para) + after[end:]
+
+
+def _break_after_section(after: str, section_para: str) -> str:
+    """A section ended on an image page: the next section starts a new page by itself,
+    unless it is 'continuous' (its type sits in the NEXT sectPr)."""
+    nxt = re.search(r'<w:sectPr[ >].*?</w:sectPr>', after, re.S)
+    if nxt and 'w:type w:val="continuous"' in nxt[0]:
+        return _break_next(after)
+    return after
 
 
 _PPR_AFTER_BDR = ("shd", "tabs", "suppressAutoHyphens", "kinsoku", "wordWrap", "overflowPunct", "topLinePunct",
