@@ -18,6 +18,7 @@ import re
 import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
+from .i18n import T
 
 try:
     import pymupdf
@@ -236,7 +237,7 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None) -> None:
     body: list[str] = []
     n = len(doc)
     for pno, page in enumerate(doc):
-        progress(f"{pdf_path.name}: sayfa {pno + 1}/{n} (birebir düzen)")
+        progress(T("{0}: sayfa {1}/{2} (birebir düzen)", pdf_path.name, pno + 1, n))
         W, H = page.rect.width, page.rect.height
         blocks = _lines(page, cmap)
         rid = f"rIdImg{pno + 1}"

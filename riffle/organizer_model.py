@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .actions import IMAGES, OFFICE, PDF, ConversionError, open_pdf, pymupdf, unique_path
+from .i18n import T
 
 A4 = (595.0, 842.0)
 IMAGE_MARGIN = 28.0  # pt (~1 cm): A4'e yerleştirilen görselin kenar boşluğu
@@ -95,11 +96,11 @@ class Document:
                 elif ext in OFFICE:
                     if p not in converted:
                         if not batch_failed:
-                            errors.append(f"{p.name}: PDF'e çevrilemedi")
+                            errors.append(T("{0}: PDF'e çevrilemedi", p.name))
                         continue
                     new += self._pdf_pages(converted[p], label=p.name, origin=p)
                 else:
-                    errors.append(f"{p.name}: desteklenmeyen dosya türü")
+                    errors.append(T("{0}: desteklenmeyen dosya türü", p.name))
             except ConversionError as e:
                 errors.append(str(e))
             except Exception as e:
@@ -132,7 +133,7 @@ class Document:
         if ref is not None and ref.kind == "pdf":
             size = ref.size
         pos = len(self.pages) if at is None else at
-        self.pages.insert(pos, PageRef("blank", None, 0, 0, size, "Boş sayfa", self._uid()))
+        self.pages.insert(pos, PageRef("blank", None, 0, 0, size, T("Boş sayfa"), self._uid()))
 
     # ------------------------------------------------------------ düzenleme
 
@@ -272,7 +273,7 @@ class Document:
 
     def save(self, folder: Path, stem: str, progress=lambda m: None) -> list[Path]:
         if not self.pages:
-            raise ConversionError("Kaydedilecek sayfa yok.")
+            raise ConversionError(T("Kaydedilecek sayfa yok."))
         groups = self.groups()
         outputs, cache = [], {}
         try:
@@ -280,7 +281,7 @@ class Document:
                 out_doc = pymupdf.open()
                 toc, prev = [], None
                 for k, p in enumerate(g):
-                    progress(f"Kaydediliyor: {gi + 1}/{len(groups)} · sayfa {k + 1}/{len(g)}")
+                    progress(T("Kaydediliyor: {0}/{1} · sayfa {2}/{3}", gi + 1, len(groups), k + 1, len(g)))
                     self._append(out_doc, p, cache)
                     # her dosyanın ardışık sayfa grubu bir yer imi (boş sayfa önceki gruba dahil)
                     if p.origin is not None and p.origin != prev:

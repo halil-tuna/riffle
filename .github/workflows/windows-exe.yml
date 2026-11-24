@@ -1,4 +1,4 @@
-name: Windows kurulum dosyası
+name: Windows installer
 
 on:
   push:
@@ -54,10 +54,10 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$ver" packaging\installer.iss
       - uses: actions/upload-artifact@v4
         with:
-          name: Riffle-kurulum
-          path: dist/Riffle-*-kurulum.exe
+          name: Riffle-setup
+          path: dist/Riffle-*-setup.exe
       - name: Sürüme ekle
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Riffle-*-kurulum.exe
+          files: dist/Riffle-*-setup.exe

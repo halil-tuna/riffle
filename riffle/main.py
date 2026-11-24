@@ -15,6 +15,7 @@ import sys
 import warnings
 from dataclasses import replace
 from pathlib import Path
+from .i18n import T
 
 warnings.filterwarnings("ignore")
 
@@ -59,13 +60,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] == "--list":
         for a in ACTIONS:
-            print(f"{a.id:12} {a.label:28} {', '.join(a.extensions)}")
+            print(f"{a.id:12} {T(a.label):28} {', '.join(T(e) if e.startswith('<') else e for e in a.extensions)}")
         return 0
 
     action_id, raw_paths = argv[0], argv[1:]
     action = BY_ID.get(action_id)
     if action is None:
-        print(f"Bilinmeyen işlem: {action_id}")
+        print(T("Bilinmeyen işlem: {0}", action_id))
         return 2
 
     from .collect import collect
@@ -84,15 +85,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             skipped.append(p.name)
     if not paths:
-        ui.notify("Uygun dosya yok", ", ".join(skipped))
+        ui.notify(T("Uygun dosya yok"), ", ".join(skipped))
         return 1
 
     kwargs = dict(action.kwargs)
     if action.order and len(paths) > 1:
         # önce küçük, hızlı dosya sırası penceresi; sayfalar ancak istenirse açılır
         from .actions import sorted_by_name
-        ok_text = "Birleştir" if action.quick or action.id in ("merge", "wordmerge") else "Tamam"
-        answer = ui.ask_order(sorted_by_name(paths), action.label, action.order, ok_text,
+        ok_text = T("Birleştir") if action.quick or action.id in ("merge", "wordmerge") else T("Tamam")
+        answer = ui.ask_order(sorted_by_name(paths), T(action.label), T(action.order), ok_text,
                               allow_pages=action.id != "wordmerge")     # Word birleştirme PDF'e gitmesin
         if answer is None:
             return 1                     # İptal
@@ -102,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 organize(paths, print)
             except ConversionError as e:
-                ui.notify("Hata", str(e))
+                ui.notify(T("Hata"), str(e))
                 return 1
             return 0
         kwargs["ordered"] = True
@@ -115,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["password"] = pw
     if action.ask:
         key, question, default = action.ask
-        answer = ui.ask_text(question, default)
+        answer = ui.ask_text(T(question), T(default) if default else default)
         if answer is None:
             return 1
         kwargs[key] = answer
@@ -129,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             outputs = action.func(paths, print, **kwargs)
         except ConversionError as e:
-            ui.notify("Hata", str(e))
+            ui.notify(T("Hata"), str(e))
             return 1
         _count_use(action.id, settings)
         return 0
@@ -139,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
                     and settings.load()["parallel"] and parallel.workers_for(len(paths)) > 1)
 
     def job(progress):
-        errors = [f"{n}: desteklenmeyen dosya, atlandı" for n in skipped]
+        errors = [T("{0}: desteklenmeyen dosya, atlandı", n) for n in skipped]
         outputs: list[Path] = []
 
         def prog(m):
@@ -163,11 +164,11 @@ def main(argv: list[str] | None = None) -> int:
                     except Exception as e:
                         errors.append(f"{batch[0].name}: {type(e).__name__}: {e}")
         except parallel.Cancelled:
-            errors.append("İptal edildi" + (f" ({len(outputs)} dosya tamamlanmıştı)." if outputs else "."))
+            errors.append(T("İptal edildi") + (T(" ({0} dosya tamamlanmıştı).", len(outputs)) if outputs else "."))
         return outputs, errors
 
     n = len(paths)
-    title = f"{action.label} — {n} dosya" if n > 1 else f"{action.label} — {paths[0].name}"
+    title = T("{0} — {1} dosya", T(action.label), n) if n > 1 else f"{T(action.label)} — {paths[0].name}"
     ui.run_with_window(title, job, cancel=parallel.CANCEL)
     if not parallel.CANCEL.is_set():
         _count_use(action.id, settings)

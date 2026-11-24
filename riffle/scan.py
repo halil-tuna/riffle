@@ -14,6 +14,7 @@ import io
 from pathlib import Path
 
 import numpy as np
+from .i18n import T
 
 try:
     import cv2
@@ -167,7 +168,7 @@ def photo_to_page_image(path: Path) -> tuple[bytes, tuple[int, int], bool]:
     """(JPEG baytları, (genişlik, yükseklik), köşe bulundu mu)"""
     if cv2 is None:
         from .actions import ConversionError
-        raise ConversionError("Fotoğraftan belge için OpenCV gerekli: pip install opencv-python-headless")
+        raise ConversionError(T("Fotoğraftan belge için OpenCV gerekli: pip install opencv-python-headless"))
     from .tools import _open_image
     rgb = np.asarray(_open_image(path))            # HEIC + EXIF yönü
     bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
@@ -198,7 +199,7 @@ def photos_to_pdf(paths: list[Path], out_path: Path, progress=lambda m: None, oc
     out = pymupdf.open()
     found = 0
     for i, p in enumerate(paths):
-        progress(f"Belge hazırlanıyor: {p.name} ({i + 1}/{len(paths)})")
+        progress(T("Belge hazırlanıyor: {0} ({1}/{2})", p.name, i + 1, len(paths)))
         data, (w, h), ok = photo_to_page_image(p)
         found += ok
         W, H = A4 if h >= w else (A4[1], A4[0])

@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 
 from .actions import ConversionError, fix_tounicode, open_pdf, pymupdf, unique_path  # noqa: F401
+from .i18n import T
 
 
 def config_dir() -> Path:
@@ -52,7 +53,7 @@ def clean_signature(src, ink=(16, 32, 96)) -> bytes:
     alpha = np.clip((dark - thr * 0.5) / max(thr, 1e-3), 0, 1)
     alpha[dark < thr * 0.5] = 0
     if alpha.max() == 0:
-        raise ConversionError("Görselde imza bulunamadı (beyaz kâğıda koyu kalemle atılmış olmalı).")
+        raise ConversionError(T("Görselde imza bulunamadı (beyaz kâğıda koyu kalemle atılmış olmalı)."))
     ys, xs = np.nonzero(alpha > 0.2)
     pad = 6
     y0, y1 = max(ys.min() - pad, 0), min(ys.max() + pad + 1, alpha.shape[0])
@@ -85,7 +86,7 @@ def strokes_to_png(strokes, size=(600, 220), width=5, ink=(16, 32, 96)) -> bytes
                 r = width * scale / 2
                 dr.ellipse((x - r, y - r, x + r, y + r), fill=ink + (255,))
     if not pts_all:
-        raise ConversionError("İmza boş.")
+        raise ConversionError(T("İmza boş."))
     bbox = im.getbbox()
     im = im.crop(bbox).resize((max(1, (bbox[2] - bbox[0]) // scale), max(1, (bbox[3] - bbox[1]) // scale)),
                               Image.LANCZOS)
@@ -105,7 +106,7 @@ def image_bytes(path: Path) -> bytes:
     try:
         im = ImageOps.exif_transpose(Image.open(path))
     except Exception as e:
-        raise ConversionError(f"{Path(path).name} açılamadı: {e}")
+        raise ConversionError(T("{0} açılamadı: {1}", Path(path).name, e))
     if im.mode not in ("RGB", "RGBA"):
         im = im.convert("RGBA")
     im.thumbnail((2000, 2000))

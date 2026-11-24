@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from .actions import ConversionError, Progress, human_size, unique_path
+from .i18n import T
 
 CLIPBOARD = "\x00clip:"    # ilerleme penceresine: bu metni panoya kopyala (ekranda gösterilmez)
 
@@ -18,7 +19,7 @@ def _open(p: Path):
 
 # ============================================================ görseldeki yazı
 
-MARK = "[denklem / şekil — okunamadı]"
+MARK = T("[denklem / şekil — okunamadı]")
 
 
 def _ink_bands(gray, min_ink: int = 3) -> list[tuple[int, int]]:
@@ -106,7 +107,7 @@ def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
     ocr.require()
     outputs, texts = [], []
     for p in paths:
-        progress(f"Yazı okunuyor: {p.name}")
+        progress(T("Yazı okunuyor: {0}", p.name))
         im = _open(p)
         # küçük ekran görüntülerinde Tesseract harfleri kaçırıyor: kısa kenarı en az ~1500 px
         if min(im.size) < 1200:
@@ -122,7 +123,7 @@ def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
             words = ocr.ocr_pages(doc, [0])[0]
         text = _text_from_words(words, im.convert("L"), scale=72 / ocr.OCR_DPI)
         if not text:
-            progress(f"ℹ {p.name}: okunabilir yazı bulunamadı")
+            progress(T("ℹ {0}: okunabilir yazı bulunamadı", p.name))
             continue
         out = unique_path(p.parent, p.stem, ".txt")
         out.write_text(text + "\n", encoding="utf-8")
@@ -130,11 +131,11 @@ def image_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
         texts.append(text if len(paths) == 1 else f"--- {p.name} ---\n{text}")
         n = len(text.replace(MARK, "").split())
         marks = text.count(MARK)
-        progress(f"ℹ {p.name}: {n} kelime okundu" + (
-            f" · {marks} yerde denklem/şekil var, metinde [ ] ile işaretli (yazı tanıma bunları okuyamaz)"
+        progress(T("ℹ {0}: {1} kelime okundu", p.name, n) + (
+            T(" · {0} yerde denklem/şekil var, metinde [ ] ile işaretli (yazı tanıma bunları okuyamaz)", marks)
             if marks else ""))
     if not outputs:
-        raise ConversionError("Görsellerde okunabilir yazı bulunamadı.")
+        raise ConversionError(T("Görsellerde okunabilir yazı bulunamadı."))
     progress(CLIPBOARD + "\n\n".join(texts))
     return outputs
 
@@ -145,12 +146,12 @@ def _parse_kb(target: str) -> int:
     s = str(target).strip().lower().replace(",", ".").replace(" ", "")
     m = re.match(r"^(\d+(?:\.\d+)?)(kb|k|mb|m)?$", s)
     if not m:
-        raise ConversionError(f"Hedef boyut anlaşılamadı: {target!r} (ör. 200 ya da 1.5mb)")
+        raise ConversionError(T("Hedef boyut anlaşılamadı: {0!r} (ör. 200 ya da 1.5mb)", target))
     v = float(m[1])
     unit = m[2] or "kb"
     kb = v * 1024 if unit.startswith("m") else v
     if kb < 5:
-        raise ConversionError("Hedef boyut en az 5 KB olmalı.")
+        raise ConversionError(T("Hedef boyut en az 5 KB olmalı."))
     return int(kb * 1024)
 
 
@@ -165,7 +166,7 @@ def image_to_target(paths: list[Path], progress: Progress, target: str = "200", 
     limit = _parse_kb(target)
     outputs = []
     for p in paths:
-        progress(f"Hedef boyuta indiriliyor: {p.name}")
+        progress(T("Hedef boyuta indiriliyor: {0}", p.name))
         im = _open(p).convert("RGB")
         before = p.stat().st_size
         best = None
@@ -183,11 +184,11 @@ def image_to_target(paths: list[Path], progress: Progress, target: str = "200", 
                 break
             im = im.resize((max(1, int(im.width * 0.85)), max(1, int(im.height * 0.85))))
         if best is None:
-            raise ConversionError(f"{p.name}: {human_size(limit)} altına inmiyor.")
+            raise ConversionError(T("{0}: {1} altına inmiyor.", p.name, human_size(limit)))
         label = f"{round(limit / 1024)}kb"
         out = unique_path(p.parent, f"{p.stem}_{label}", ".jpg")
         out.write_bytes(best)
-        progress(f"ℹ {p.name}: {human_size(before)} → {human_size(len(best))} · {im.width}×{im.height} px")
+        progress(T("ℹ {0}: {1} → {2} · {3}×{4} px", p.name, human_size(before), human_size(len(best)), im.width, im.height))
         outputs.append(out)
     return outputs
 
@@ -198,7 +199,7 @@ def images_to_png(paths: list[Path], progress: Progress, **_) -> list[Path]:
     from PIL import Image, ImageOps
     outputs = []
     for p in paths:
-        progress(f"PNG'ye çevriliyor: {p.name}")
+        progress(T("PNG'ye çevriliyor: {0}", p.name))
         if p.suffix.lower() in (".heic", ".heif"):
             im = _open(p)
         else:
@@ -214,7 +215,7 @@ def rotate_images(paths: list[Path], progress: Progress, angle: int = 90, **_) -
     from PIL import Image, ImageOps
     outputs = []
     for p in paths:
-        progress(f"Döndürülüyor: {p.name}")
+        progress(T("Döndürülüyor: {0}", p.name))
         ext = p.suffix.lower()
         if ext in (".heic", ".heif"):
             im, ext = _open(p), ".jpg"

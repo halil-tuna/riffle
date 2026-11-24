@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .actions import ConversionError, Progress, human_size, unique_dir, unique_path
+from .i18n import T
 
 MEDIA_DIRS = ("word/media/", "ppt/media/", "xl/media/")
 RASTER = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
@@ -100,19 +101,18 @@ def compress_office(paths: list[Path], progress: Progress, max_side: int = 1920,
     outputs = []
     for p in paths:
         if p.suffix.lower() not in (".docx", ".pptx", ".xlsx"):
-            progress(f"ℹ {p.name}: yalnızca .docx, .pptx ve .xlsx küçültülebilir (eski biçim: önce PDF'e ya "
-                     "da yeni biçime kaydet)")
+            progress(T("ℹ {0}: yalnızca .docx, .pptx ve .xlsx küçültülebilir (eski biçim: önce PDF'e ya da yeni biçime kaydet)", p.name))
             continue
         try:
             zin = zipfile.ZipFile(p)
         except zipfile.BadZipFile:
-            raise ConversionError(f"{p.name} açılamadı (bozuk ya da şifreli Office dosyası).")
+            raise ConversionError(T("{0} açılamadı (bozuk ya da şifreli Office dosyası).", p.name))
         with zin:
             media = [n for n in zin.namelist() if _media(n) and Path(n).suffix.lower() in RASTER]
             replaced, renames = {}, {}
             used = set(zin.namelist())
             for k, name in enumerate(media, 1):
-                progress(f"{p.name}: resim {k}/{len(media)}")
+                progress(T("{0}: resim {1}/{2}", p.name, k, len(media)))
                 ext = Path(name).suffix.lower()
                 new, new_ext = _shrink_image(zin.read(name), ext, max_side, quality)
                 if new_ext != ext:
@@ -127,7 +127,7 @@ def compress_office(paths: list[Path], progress: Progress, max_side: int = 1920,
                     replaced[name] = new
         before = p.stat().st_size
         if not replaced:
-            progress(f"ℹ {p.name}: küçültülecek resim yok ({human_size(before)})")
+            progress(T("ℹ {0}: küçültülecek resim yok ({1})", p.name, human_size(before)))
             continue
         out = unique_path(p.parent, f"{p.stem}_kucuk", p.suffix)
         tmp = out.with_name(out.name + ".tmp")
@@ -138,11 +138,10 @@ def compress_office(paths: list[Path], progress: Progress, max_side: int = 1920,
         finally:
             tmp.unlink(missing_ok=True)
         after = out.stat().st_size
-        progress(f"ℹ {p.name}: {human_size(before)} → {human_size(after)} "
-                 f"(%{max(0, round(100 * (1 - after / before)))} küçüldü, {len(replaced)} resim)")
+        progress(T("ℹ {0}: {1} → {2} (%{3} küçüldü, {4} resim)", p.name, human_size(before), human_size(after), max(0, round(100 * (1 - after / before))), len(replaced)))
         outputs.append(out)
     if not outputs and paths:
-        raise ConversionError("Küçültülecek resim bulunamadı.")
+        raise ConversionError(T("Küçültülecek resim bulunamadı."))
     return outputs
 
 
@@ -162,9 +161,9 @@ def _check_office(path: Path) -> None:
     except ImportError:
         with zipfile.ZipFile(path) as z:
             if z.testzip() is not None:
-                raise ConversionError("Küçültülmüş dosya doğrulanamadı.")
+                raise ConversionError(T("Küçültülmüş dosya doğrulanamadı."))
     except Exception as e:
-        raise ConversionError(f"Küçültülmüş dosya doğrulanamadı: {e}")
+        raise ConversionError(T("Küçültülmüş dosya doğrulanamadı: {0}", e))
 
 
 # ============================================================ Word belgelerini Word olarak birleştir
@@ -173,34 +172,34 @@ def merge_word(paths: list[Path], progress: Progress, ordered: bool = False, **_
     from .actions import sorted_by_name
     paths = [p for p in (paths if ordered else sorted_by_name(paths)) if p.suffix.lower() == ".docx"]
     if len(paths) < 2:
-        raise ConversionError("Birleştirmek için en az iki .docx dosyası seç.")
+        raise ConversionError(T("Birleştirmek için en az iki .docx dosyası seç."))
     try:
         from docx import Document
         from docxcompose.composer import Composer
     except ImportError:
-        raise ConversionError("Word birleştirme için gerekli: pip install docxcompose")
-    progress(f"Açılıyor: {paths[0].name}")
+        raise ConversionError(T("Word birleştirme için gerekli: pip install docxcompose"))
+    progress(T("Açılıyor: {0}", paths[0].name))
     master = Document(str(paths[0]))
     comp = Composer(master)
     for k, p in enumerate(paths[1:], 2):
-        progress(f"Ekleniyor ({k}/{len(paths)}): {p.name}")
+        progress(T("Ekleniyor ({0}/{1}): {2}", k, len(paths), p.name))
         try:
             doc = Document(str(p))
         except Exception as e:
-            raise ConversionError(f"{p.name} açılamadı: {e}")
+            raise ConversionError(T("{0} açılamadı: {1}", p.name, e))
         master.add_page_break()            # her belge yeni sayfadan başlasın
         comp.append(doc)
     out = unique_path(paths[0].parent, f"{paths[0].stem}_birlesik", ".docx")
     comp.save(str(out))
-    progress(f"ℹ {len(paths)} belge birleştirildi; biçimler, resimler ve numaralı listeler korunur")
+    progress(T("ℹ {0} belge birleştirildi; biçimler, resimler ve numaralı listeler korunur", len(paths)))
     return [out]
 
 
 # ============================================================ CSV → Excel
 
 ENCODINGS = ("utf-8-sig", "utf-16", "cp1254", "iso-8859-9", "cp1252")
-ENC_NAMES = {"utf-8-sig": "UTF-8", "utf-16": "UTF-16", "cp1254": "Windows-1254 (Türkçe)",
-             "iso-8859-9": "ISO-8859-9 (Türkçe)", "cp1252": "Windows-1252"}
+ENC_NAMES = {"utf-8-sig": "UTF-8", "utf-16": "UTF-16", "cp1254": T("Windows-1254 (Türkçe)"),
+             "iso-8859-9": T("ISO-8859-9 (Türkçe)"), "cp1252": "Windows-1252"}
 
 
 def _decode(data: bytes) -> tuple[str, str]:
@@ -295,20 +294,20 @@ def csv_to_excel(paths: list[Path], progress: Progress, **_) -> list[Path]:
     from openpyxl.utils import get_column_letter
     outputs = []
     for p in paths:
-        progress(f"Okunuyor: {p.name}")
+        progress(T("Okunuyor: {0}", p.name))
         text, enc = _decode(p.read_bytes())
         delim = _delimiter(text)
         rows = list(csv.reader(io.StringIO(text), delimiter=delim))
         rows = [r for r in rows if any(c.strip() for c in r)]
         if not rows:
-            progress(f"ℹ {p.name}: boş dosya")
+            progress(T("ℹ {0}: boş dosya", p.name))
             continue
         width = max(len(r) for r in rows)
         cols = [[r[i] for r in rows[1:] if i < len(r)] for i in range(width)]
         styles = [_column_style(c) for c in cols]
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = p.stem[:31] or "Sayfa1"
+        ws.title = p.stem[:31] or T("Sayfa1")
         for r_i, row in enumerate(rows, 1):
             for c_i, v in enumerate(row, 1):
                 val = v if r_i == 1 else _convert(v, styles[c_i - 1])
@@ -327,9 +326,8 @@ def csv_to_excel(paths: list[Path], progress: Progress, **_) -> list[Path]:
             ws.column_dimensions[get_column_letter(i)].width = min(max(longest + 2, 8), 50)
         out = unique_path(p.parent, p.stem, ".xlsx")
         wb.save(out)
-        sep = {";": "noktalı virgül", ",": "virgül", "\t": "sekme", "|": "dikey çizgi"}[delim]
-        progress(f"ℹ {p.name}: {len(rows) - 1} satır, {width} sütun · kodlama {ENC_NAMES.get(enc, enc)} · "
-                 f"ayırıcı {sep}")
+        sep = {";": T("noktalı virgül"), ",": T("virgül"), "\t": "sekme", "|": T("dikey çizgi")}[delim]
+        progress(T("ℹ {0}: {1} satır, {2} sütun · kodlama {3} · ayırıcı {4}", p.name, len(rows) - 1, width, ENC_NAMES.get(enc, enc), sep))
         outputs.append(out)
     return outputs
 
@@ -349,9 +347,9 @@ def slide_handout(paths: list[Path], progress: Progress, per_page: int = 3, **_)
         for p in paths:
             src_pdf = pdfs.get(p)
             if not src_pdf:
-                progress(f"ℹ {p.name} çevrilemedi")
+                progress(T("ℹ {0} çevrilemedi", p.name))
                 continue
-            progress(f"Not çıktısı: {p.name}")
+            progress(T("Not çıktısı: {0}", p.name))
             with pymupdf.open(src_pdf) as src, pymupdf.open() as out:
                 W, H = pymupdf.paper_size("a4")
                 margin, gap = 36, 18
@@ -387,12 +385,12 @@ def extract_office_images(paths: list[Path], progress: Progress, min_bytes: int 
     outputs = []
     for p in paths:
         if p.suffix.lower() not in (".docx", ".pptx", ".xlsx"):
-            progress(f"ℹ {p.name}: yalnızca .docx, .pptx ve .xlsx")
+            progress(T("ℹ {0}: yalnızca .docx, .pptx ve .xlsx", p.name))
             continue
         try:
             z = zipfile.ZipFile(p)
         except zipfile.BadZipFile:
-            raise ConversionError(f"{p.name} açılamadı.")
+            raise ConversionError(T("{0} açılamadı.", p.name))
         seen, saved, skipped_small, vector = set(), [], 0, 0
         with z:
             media = sorted(n for n in z.namelist() if _media(n))
@@ -416,16 +414,16 @@ def extract_office_images(paths: list[Path], progress: Progress, min_bytes: int 
                 dst.write_bytes(data)
                 saved.append(dst)
         if not saved:
-            progress(f"ℹ {p.name}: resim yok")
+            progress(T("ℹ {0}: resim yok", p.name))
             continue
-        note = f"ℹ {p.name}: {len(saved)} resim → {folder.name}"
+        note = T("ℹ {0}: {1} resim → {2}", p.name, len(saved), folder.name)
         if skipped_small:
-            note += f" · {skipped_small} küçük simge atlandı"
+            note += T(" · {0} küçük simge atlandı", skipped_small)
         if vector:
-            note += f" · {vector} çizim (EMF/WMF/SVG) olduğu gibi kaydedildi" if any(
+            note += T(" · {0} çizim (EMF/WMF/SVG) olduğu gibi kaydedildi", vector) if any(
                 s.suffix in (".emf", ".wmf", ".svg") for s in saved) else ""
         progress(note)
         outputs.append(folder)
     if not outputs and paths:
-        raise ConversionError("Resim bulunamadı.")
+        raise ConversionError(T("Resim bulunamadı."))
     return outputs

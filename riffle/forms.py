@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import APP_NAME
 from .actions import ConversionError, open_pdf, pymupdf, unique_path
+from .i18n import T
 
 TEXT, CHECK, RADIO, COMBO, LIST = "text", "check", "radio", "combo", "list"
 
@@ -90,7 +91,7 @@ def read_fields(doc) -> list[Field]:
                     seq.append(x[4])
                     end = x[2]
                 opt_label = " ".join(seq) or (
-                    on if isinstance(on, str) and on not in ("Off", "Yes", "On") else f"Seçenek {int(idx) + 1}")
+                    on if isinstance(on, str) and on not in ("Off", "Yes", "On") else T("Seçenek {0}", int(idx) + 1))
                 f.options.append((idx, opt_label))
                 if w.field_value not in (None, "", "Off", False, "None"):
                     f.value = idx
@@ -156,13 +157,12 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
     if not fields:
         r = tk.Tk()
         r.withdraw()
-        messagebox.showinfo(APP_NAME, f"{src.name} içinde doldurulabilir alan yok.\n\n"
-                                      "Yazı eklemek için: sağ tık → 'İmza / yazı / logo ekle…'", parent=r)
+        messagebox.showinfo(APP_NAME, T("{0} içinde doldurulabilir alan yok.\n\nYazı eklemek için: sağ tık → 'İmza / yazı / logo ekle…'", src.name), parent=r)
         r.destroy()
         return []
 
     root = tk.Tk()
-    root.title(f"{APP_NAME} — Form doldur — {src.name}")
+    root.title(T("{0} — Form doldur — {1}", APP_NAME, src.name))
     root.geometry(f"720x{min(760, root.winfo_screenheight() - 80)}")
     root.minsize(480, 320)
     from . import theme
@@ -170,7 +170,7 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
     head = ttk.Frame(root, padding=(20, 16, 20, 8))
     head.pack(fill="x")
     ttk.Label(head, text=src.stem, style="Heading.TLabel").pack(anchor="w")
-    ttk.Label(head, text=f"{len(fields)} alan · {npages} sayfa · Ctrl+S kaydeder",
+    ttk.Label(head, text=T("{0} alan · {1} sayfa · Ctrl+S kaydeder", len(fields), npages),
               style="Muted.TLabel").pack(anchor="w")
 
     outer = ttk.Frame(root)
@@ -197,7 +197,7 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
     first_input = None
     for f in fields:
         if f.page != last_page and npages > 1:
-            ttk.Label(inner, text=f"Sayfa {f.page + 1}", style="Section.TLabel").grid(
+            ttk.Label(inner, text=T("Sayfa {0}", f.page + 1), style="Section.TLabel").grid(
                 row=row, column=0, columnspan=2, sticky="w", pady=(12, 4))
             row += 1
             last_page = f.page
@@ -247,7 +247,7 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
     foot = ttk.Frame(root, padding=(20, 12))
     foot.pack(fill="x")
     flat = tk.BooleanVar(value=False)
-    ttk.Checkbutton(foot, text="Düzleştir (alanlar düz yazı olsun, sonradan değiştirilemesin)",
+    ttk.Checkbutton(foot, text=T("Düzleştir (alanlar düz yazı olsun, sonradan değiştirilemesin)"),
                     variable=flat).pack(side="left")
     saved: list[Path] = []
     status = ttk.Label(root, padding=(20, 0, 20, 10), foreground=pal.success)
@@ -261,11 +261,11 @@ def run(paths: list[Path], progress=print, **_) -> list[Path]:
             messagebox.showerror(APP_NAME, str(e), parent=root)
             return
         saved.append(out)
-        status.configure(text=f"✔ Kaydedildi: {out.name}")
-        print("Tamamlandı:", out.name)
+        status.configure(text=T("✔ Kaydedildi: {0}", out.name))
+        print(T("Tamamlandı:"), out.name)
         sys.stdout.flush()
 
-    ttk.Button(foot, text="Kaydet", style="Accent.TButton", width=12, command=save).pack(side="right")
+    ttk.Button(foot, text=T("Kaydet"), style="Accent.TButton", width=12, command=save).pack(side="right")
     root.bind("<Control-s>", lambda e: (save(), "break")[1])
     if first_input is not None:
         first_input.focus_set()

@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+from .i18n import T
 
 try:
     import pymupdf  # PyMuPDF >= 1.24
@@ -60,9 +61,37 @@ def _redirect(folder: Path) -> Path:
         return folder
 
 
+# Çıktı adı ekleri: kaynakta Türkçe yazılır, İngilizce arayüzde karşılığına çevrilir (adın sonunda)
+_SUFFIX_EN = [
+    (r"_cok_sikistirilmis$", "_compressed_max"), (r"_sikistirilmis$", "_compressed"), (r"_birlesik$", "_merged"),
+    (r"_duzenlenmis$", "_edited"), (r"_kucuk$", "_small"), (r"_resimler$", "_images"),
+    (r"_sayfa_silindi$", "_pages_removed"), (r"_secilen_sayfalar$", "_selected_pages"), (r"_sayfalar$", "_pages"),
+    (r"_bossuz$", "_no_blank_pages"), (r"_belge$", "_document"), (r"_duzeltilmis$", "_fixed"),
+    (r"_siyah_beyaz$", "_grayscale"), (r"_kitapcik$", "_booklet"), (r"_not_ciktisi$", "_handout"),
+    (r"_sifresiz$", "_unlocked"), (r"_sifreli$", "_protected"), (r"_dondurulmus(_\d+)?$", r"_rotated\1"),
+    (r"_kirpilmis$", "_cropped"), (r"_imzali$", "_signed"), (r"_filigranli$", "_watermarked"),
+    (r"_numarali$", "_numbered"), (r"_doldurulmus$", "_filled"), (r"_onarilmis$", "_repaired"),
+    (r"_karartilmis$", "_redacted"), (r"_ters$", "_reversed"), (r"_(\d)li$", r"_\1up"),
+    (r"_tablolar$", "_tables"), (r"_a4$", "_a4"), (r"_parcalar$", "_parts"), (r"_parca(\d+)$", r"_part\1"),
+    (r"^karsilastirma_", "comparison_"),
+]
+
+
+def localized_stem(stem: str) -> str:
+    from .i18n import lang
+    if lang() != "en":
+        return stem
+    for pat, rep in _SUFFIX_EN:
+        new = re.sub(pat, rep, stem)
+        if new != stem:
+            return new
+    return stem
+
+
 def unique_path(folder: Path, stem: str, ext: str) -> Path:
     """folder/stem.ext boşsa onu, doluysa 'stem (1).ext' gibi bir yol verir."""
     folder = _redirect(folder)
+    stem = localized_stem(stem)
     ext = ext if ext.startswith(".") else "." + ext
     p = folder / f"{stem}{ext}"
     i = 1
@@ -74,6 +103,7 @@ def unique_path(folder: Path, stem: str, ext: str) -> Path:
 
 def unique_dir(folder: Path, name: str) -> Path:
     folder = _redirect(folder)
+    name = localized_stem(name)
     p = folder / name
     i = 1
     while p.exists():
@@ -95,11 +125,11 @@ def open_pdf(path: Path, password: str | None = None):
     try:
         doc = pymupdf.open(path)
     except Exception as e:
-        raise ConversionError(f"{path.name} açılamadı (bozuk PDF olabilir): {e}")
+        raise ConversionError(T("{0} açılamadı (bozuk PDF olabilir): {1}", path.name, e))
     if doc.needs_pass:
         if not password or not doc.authenticate(password):
             doc.close()
-            raise ConversionError(f"{path.name} şifreli. Önce 'Şifreyi kaldır' kullan.")
+            raise ConversionError(T("{0} şifreli. Önce 'Şifreyi kaldır' kullan.", path.name))
     return doc
 
 
@@ -192,12 +222,12 @@ def save_with_toc(out_doc, toc: list, path: Path) -> None:
 
 def merge_pdfs(paths: list[Path], progress: Progress, ordered: bool = False, **_) -> list[Path]:
     if len(paths) < 2:
-        raise ConversionError("Birleştirmek için en az 2 PDF seç.")
+        raise ConversionError(T("Birleştirmek için en az 2 PDF seç."))
     if not ordered:                      # sıralama penceresinden geldiyse kullanıcının sırası korunur
         paths = sorted_by_name(paths)
     out_doc, toc = pymupdf.open(), []
     for p in paths:
-        progress(f"Ekleniyor: {p.name}")
+        progress(T("Ekleniyor: {0}", p.name))
         with open_pdf(p) as src:
             append_with_bookmark(out_doc, src, p.stem, 1, toc)
     out = unique_path(paths[0].parent, f"{paths[0].stem}_birlesik", ".pdf")
@@ -214,10 +244,10 @@ def split_pdf(paths: list[Path], progress: Progress, **_) -> list[Path]:
             folder = unique_dir(p.parent, f"{p.stem}_sayfalar")
             width = len(str(n))
             for i in range(n):
-                progress(f"{p.name}: sayfa {i + 1}/{n}")
+                progress(T("{0}: sayfa {1}/{2}", p.name, i + 1, n))
                 part = pymupdf.open()
                 part.insert_pdf(src, from_page=i, to_page=i)
-                part.save(folder / f"{p.stem}_s{i + 1:0{width}d}.pdf",
+                part.save(folder / f"{p.stem}_{T('s')}{i + 1:0{width}d}.pdf",
                           garbage=3, deflate=True)
                 part.close()
             outputs.append(folder)
@@ -236,7 +266,7 @@ def compress_pdf(paths: list[Path], progress: Progress, level: str = "normal", *
     suffix = "_sikistirilmis" if level == "normal" else "_cok_sikistirilmis"
     outputs = []
     for p in paths:
-        progress(f"Sıkıştırılıyor: {p.name}")
+        progress(T("Sıkıştırılıyor: {0}", p.name))
         before = p.stat().st_size
         with open_pdf(p) as doc:
             if hasattr(doc, "rewrite_images"):
@@ -248,10 +278,10 @@ def compress_pdf(paths: list[Path], progress: Progress, level: str = "normal", *
         if after >= before:
             # Kazanç yoksa daha büyük dosya bırakma
             shutil.copy2(p, out)
-            progress(f"ℹ {p.name} zaten optimize, küçültülemedi.")
+            progress(T("ℹ {0} zaten optimize, küçültülemedi.", p.name))
         else:
             pct = 100 * (before - after) / before
-            progress(f"ℹ {p.name}: {human_size(before)} → {human_size(after)} (%{pct:.0f} küçüldü)")
+            progress(T("ℹ {0}: {1} → {2} (%{3:.0f} küçüldü)", p.name, human_size(before), human_size(after), pct))
         outputs.append(out)
     return outputs
 
@@ -259,7 +289,7 @@ def compress_pdf(paths: list[Path], progress: Progress, level: str = "normal", *
 def rotate_pdf(paths: list[Path], progress: Progress, angle: int = 90, **_) -> list[Path]:
     outputs = []
     for p in paths:
-        progress(f"Döndürülüyor: {p.name}")
+        progress(T("Döndürülüyor: {0}", p.name))
         with open_pdf(p) as doc:
             for page in doc:
                 page.set_rotation((page.rotation + angle) % 360)
@@ -271,10 +301,10 @@ def rotate_pdf(paths: list[Path], progress: Progress, angle: int = 90, **_) -> l
 
 def protect_pdf(paths: list[Path], progress: Progress, password: str = "", **_) -> list[Path]:
     if not password:
-        raise ConversionError("Şifre girilmedi.")
+        raise ConversionError(T("Şifre girilmedi."))
     outputs = []
     for p in paths:
-        progress(f"Şifreleniyor: {p.name}")
+        progress(T("Şifreleniyor: {0}", p.name))
         with open_pdf(p) as doc:
             out = unique_path(p.parent, f"{p.stem}_sifreli", ".pdf")
             doc.save(out, garbage=3, deflate=True,
@@ -287,11 +317,11 @@ def protect_pdf(paths: list[Path], progress: Progress, password: str = "", **_) 
 def unlock_pdf(paths: list[Path], progress: Progress, password: str = "", **_) -> list[Path]:
     outputs = []
     for p in paths:
-        progress(f"Şifre kaldırılıyor: {p.name}")
+        progress(T("Şifre kaldırılıyor: {0}", p.name))
         doc = pymupdf.open(p)
         try:
             if doc.needs_pass and not doc.authenticate(password):
-                raise ConversionError(f"{p.name}: şifre yanlış.")
+                raise ConversionError(T("{0}: şifre yanlış.", p.name))
             out = unique_path(p.parent, f"{p.stem}_sifresiz", ".pdf")
             doc.save(out, garbage=3, deflate=True,
                      encryption=pymupdf.PDF_ENCRYPT_NONE)
@@ -309,9 +339,9 @@ def pdf_to_jpg(paths: list[Path], progress: Progress, dpi: int = 150, **_) -> li
             width = len(str(n))
             folder = unique_dir(p.parent, f"{p.stem}_jpg")
             for i, page in enumerate(doc):
-                progress(f"{p.name}: sayfa {i + 1}/{n}")
+                progress(T("{0}: sayfa {1}/{2}", p.name, i + 1, n))
                 pix = page.get_pixmap(dpi=dpi, alpha=False)
-                pix.save(folder / f"{p.stem}_s{i + 1:0{width}d}.jpg", jpg_quality=90)
+                pix.save(folder / f"{p.stem}_{T('s')}{i + 1:0{width}d}.jpg", jpg_quality=90)
             outputs.append(folder)
     return outputs
 
@@ -321,12 +351,12 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
     try:
         from pdf2docx import Converter
     except ImportError:
-        raise ConversionError("pdf2docx kurulu değil: pip install pdf2docx")
+        raise ConversionError(T("pdf2docx kurulu değil: pip install pdf2docx"))
     import logging
     logging.getLogger().setLevel(logging.ERROR)  # pdf2docx çok konuşkan
     outputs = []
     for p in paths:
-        progress(f"Word'e çevriliyor: {p.name} (uzun sürebilir)")
+        progress(T("Word'e çevriliyor: {0} (uzun sürebilir)", p.name))
         out = unique_path(p.parent, p.stem, ".docx")
         with tempfile.TemporaryDirectory(prefix="riffle_w_") as tmp:
             src = _prepare_pdf(p, Path(tmp) / "kaynak.pdf", progress)
@@ -337,11 +367,10 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                     if fixed_layout.looks_like_slides(probe):
                         kind = "sunum"
                     elif reflow.is_two_column(probe):
-                        kind = "iki sütunlu belge"
+                        kind = T("iki sütunlu belge")
             if kind:
                 # Slayt ve iki sütunlu makale: akan metinde satırlar/sayfalar kayıyor, birebir düzen kullan
-                progress(f"ℹ {p.name}: {kind} algılandı, birebir düzen kullanıldı (yazılar yerinde "
-                         "düzenlenebilir). Akan metin için: 'PDF → Word (akan metin)'.")
+                progress(T("ℹ {0}: {1} algılandı, birebir düzen kullanıldı (yazılar yerinde düzenlenebilir). Akan metin için: 'PDF → Word (akan metin)'.", p.name, kind))
                 fixed_layout.convert(src, out, progress)
                 outputs.append(out)
                 continue
@@ -352,11 +381,11 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                 if rescued:
                     src = Path(tmp) / "figurlu.pdf"
                     d.save(src)
-                    progress(f"ℹ {p.name}: {rescued} figür resim olarak aktarıldı.")
+                    progress(T("ℹ {0}: {1} figür resim olarak aktarıldı.", p.name, rescued))
             from .textfix import patched_text
             from . import parallel
             # 0.7: ortalanmış başlık + alt başlığın tek satıra yapışmasını önler
-            settings = {"line_break_width_ratio": 0.7}
+            settings = {"line_break_width_ratio": 0.7, "page_margin_factor_top": 1.0}
             with pymupdf.open(src) as probe:
                 n_pages = len(probe)
             if n_pages >= 30 and not parallel.in_worker() and parallel.workers_for(n_pages // 10) > 1 \
@@ -377,7 +406,7 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
                     finally:
                         cv.close()
             if fixes["glyph"]:
-                progress(f"ℹ {p.name}: {fixes['glyph']} özel karakter (μ, α, ± …) kurtarıldı.")
+                progress(T("ℹ {0}: {1} özel karakter (μ, α, ± …) kurtarıldı.", p.name, fixes['glyph']))
         _unclip_table_rows(out, info)
         outputs.append(out)
     return outputs
@@ -435,7 +464,7 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
         if not ink and not textless and not cropped:
             return src
         if ink:
-            progress(f"ℹ {src.name}: {ink} el yazısı işaret (kalem/tik) Word'e aktarılmadı.")
+            progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", src.name, ink))
         # Metinsiz sayfalar: Tesseract varsa OCR → metin ağırlıklıysa düzenlenebilir metin
         ocr_words, ocr_used = {}, set()
         if textless:
@@ -459,7 +488,7 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
                 if skewed:
                     ocr_words.update(ocr.ocr_pages(doc, skewed, progress))
             except ocr.OcrUnavailable as e:
-                progress(f"ℹ OCR yapılamadı, taranmış sayfalar resim olarak aktarılacak. {str(e).splitlines()[0]}")
+                progress(T("ℹ OCR yapılamadı, taranmış sayfalar resim olarak aktarılacak. {0}", str(e).splitlines()[0]))
         if textless or cropped:
             out = pymupdf.open()
             for i, page in enumerate(doc):
@@ -479,10 +508,9 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
             out.save(dst)
             out.close()
             if ocr_used:
-                progress(f"ℹ {src.name}: {len(ocr_used)} taranmış sayfa OCR ile metne çevrildi "
-                         "(resim/imza gibi öğeler bu sayfalarda aktarılmaz).")
+                progress(T("ℹ {0}: {1} taranmış sayfa OCR ile metne çevrildi (resim/imza gibi öğeler bu sayfalarda aktarılmaz).", src.name, len(ocr_used)))
             if textless - ocr_used:
-                progress(f"ℹ {src.name}: {len(textless - ocr_used)} sayfada metin yok, resim olarak aktarıldı.")
+                progress(T("ℹ {0}: {1} sayfada metin yok, resim olarak aktarıldı.", src.name, len(textless - ocr_used)))
         else:
             doc.save(dst)
         return dst
@@ -493,6 +521,30 @@ def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
 _SLACK = 1440  # twip = 1 inç (2,5 cm) pay
 _CELL_BEFORE = 40  # twip: serbest satırlarda hücre içi üst boşluk sınırı
 _MIN_CELL = 1000  # twip ≈ 1,8 cm: bundan dar hücreli satırlar sabit kalır
+
+
+def _cap_cell_before(tc: str, row_h: int) -> str:
+    import re
+    if "<w:tbl>" in tc:
+        return tc
+    # boş hücre (birleştirilmiş sütun) belge varsayılanını alıyor: 10 pt 'sonra' boşluğu
+    # tek satırlık satırları ~4 pt şişirip tabloyu sonraki sayfaya taşırıyor
+    tc = tc.replace("<w:p/>", '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="200" w:lineRule="exact"/>'
+                              '<w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>')
+    content = 0
+    for para in re.findall(r'<w:p[ >].*?</w:p>', tc, flags=re.S):
+        line = re.search(r'w:line="(\d+)"', para)
+        content += (int(line.group(1)) if line else 276) * (para.count("<w:br") + 1)
+    room = max(_CELL_BEFORE, int(row_h - content * 1.15 - _CELL_BEFORE)) if row_h else _CELL_BEFORE
+    first = [True]
+
+    def cap(b):
+        v = int(b.group(1))
+        if first[0]:                       # yalnızca ilk paragrafın üst boşluğu iç boşluktur
+            first[0] = False
+            return f'w:before="{min(v, room)}"'
+        return f'w:before="{min(v, _CELL_BEFORE)}"'
+    return re.sub(r'w:before="(\d+)"', cap, tc)
 
 
 def _fix_layout_xml(xml: str, info=None) -> str:
@@ -510,8 +562,10 @@ def _fix_layout_xml(xml: str, info=None) -> str:
             # pdf2docx metni hücre içinde 'önce boşluk' ile konumluyor; satır serbest
             # kalınca bu boşluk satırı şişirip sayfayı taşırıyor. Satırın en az
             # yüksekliği zaten korunduğu için boşluğu küçült.
-            tr = re.sub(r'w:before="(\d+)"',
-                        lambda b: f'w:before="{min(int(b.group(1)), _CELL_BEFORE)}"', tr)
+            # Ama tamamen silmek yazıyı hücrenin tepesine yapıştırıyor (asıl belgede
+            # hücre iç boşluğu var): hücredeki satırların sığacağı kadarını koru.
+            h = int((re.search(r'<w:trHeight[^>]*w:val="(\d+)"', tr) or [0, 0])[1])
+            tr = re.sub(r'<w:tc>.*?</w:tc>', lambda c: _cap_cell_before(c.group(0), h), tr, flags=re.S)
         return tr
     xml = re.sub(r'<w:tr[ >].*?</w:tr>', unclip_row, xml, flags=re.S)
 
@@ -861,13 +915,13 @@ def _unclip_table_rows(docx: Path, info=None) -> None:
 def pdf_to_text(paths: list[Path], progress: Progress, **_) -> list[Path]:
     outputs = []
     for p in paths:
-        progress(f"Metin çıkarılıyor: {p.name}")
+        progress(T("Metin çıkarılıyor: {0}", p.name))
         with open_pdf(p) as doc:
             text = "\n\f".join(page.get_text() for page in doc)
         out = unique_path(p.parent, p.stem, ".txt")
         out.write_text(text, encoding="utf-8")
         if not text.strip():
-            progress(f"ℹ {p.name}: metin yok (taranmış PDF olabilir, OCR gerekir).")
+            progress(T("ℹ {0}: metin yok (taranmış PDF olabilir, OCR gerekir).", p.name))
         outputs.append(out)
     return outputs
 
@@ -881,7 +935,7 @@ def images_to_pdf(paths: list[Path], progress: Progress, ordered: bool = False, 
         paths = sorted_by_name(paths)
     out_doc = pymupdf.open()
     for p in paths:
-        progress(f"Ekleniyor: {p.name}")
+        progress(T("Ekleniyor: {0}", p.name))
         try:
             img = pymupdf.open(p)
             pdf_bytes = img.convert_to_pdf()
@@ -999,6 +1053,72 @@ class _LoProfile:
         return False
 
 
+_COL = re.compile(r"[A-Z]+")
+
+
+def _col_index(ref: str) -> int:
+    n = 0
+    for ch in _COL.match(ref).group(0) if _COL.match(ref) else "A":
+        n = n * 26 + ord(ch) - 64
+    return n
+
+
+_AFTER_PAGESETUP = ("headerFooter", "rowBreaks", "colBreaks", "customProperties", "cellWatches", "ignoredErrors",
+                    "smartTags", "drawing", "legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects",
+                    "controls", "webPublishItems", "tableParts", "extLst")
+
+
+def _fit_sheet_xml(xml: str) -> str:
+    """Excel sayfasını yazdırırken sütunlar tek sayfa genişliğine sığsın (yükseklik serbest). Kullanıcının
+    kendi ölçek/sığdırma ayarı varsa dokunulmaz. Geniş tablolarda kâğıt yatay olur."""
+    if re.search(r"<pageSetup\b[^>]*\b(scale|fitToWidth|fitToHeight)=", xml) or "fitToPage=\"1\"" in xml:
+        return xml
+    dim = re.search(r'<dimension ref="[A-Z]+\d+:([A-Z]+)\d+"', xml)
+    wide = dim is not None and _col_index(dim.group(1)) > 8
+    # 1) <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr> (worksheet'in ilk çocuğu)
+    m = re.search(r"<sheetPr\b([^>]*?)(/?)>", xml)
+    if m is None:
+        xml = re.sub(r"(<worksheet\b[^>]*>)", r'\1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>', xml, count=1)
+    elif m.group(2) == "/":
+        xml = xml[:m.start()] + f'<sheetPr{m.group(1)}><pageSetUpPr fitToPage="1"/></sheetPr>' + xml[m.end():]
+    elif re.search(r"<pageSetUpPr\b", xml):
+        xml = re.sub(r"<pageSetUpPr\b", '<pageSetUpPr fitToPage="1"', xml, count=1)
+    else:
+        # tabColor / outlinePr'den sonra gelmeli
+        end = xml.index("</sheetPr>")
+        xml = xml[:end] + '<pageSetUpPr fitToPage="1"/>' + xml[end:]
+    # 2) <pageSetup fitToWidth="1" fitToHeight="0" .../>
+    orient = ' orientation="landscape"' if wide else ""
+    ps = re.search(r"<pageSetup\b([^>]*?)/?>", xml)
+    if ps:
+        attrs = ps.group(1)
+        if "orientation=" in attrs:
+            orient = ""
+        xml = xml[:ps.start()] + f'<pageSetup fitToWidth="1" fitToHeight="0"{orient}{attrs}/>' + xml[ps.end():]
+        return xml
+    new = f'<pageSetup paperSize="9" fitToWidth="1" fitToHeight="0"{orient}/>'
+    pm = re.search(r"<pageMargins\b[^>]*/>", xml)
+    if pm:
+        return xml[:pm.end()] + new + xml[pm.end():]
+    new = '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>' + new
+    for tag in _AFTER_PAGESETUP:
+        i = xml.find(f"<{tag}")
+        if i >= 0:
+            return xml[:i] + new + xml[i:]
+    return xml.replace("</worksheet>", new + "</worksheet>")
+
+
+def _excel_fit_width(src: Path, dst: Path) -> None:
+    """src .xlsx'in sayfaları 'genişliğe sığdır' ayarlı kopyası (dosyanın geri kalanına dokunmadan)."""
+    import zipfile
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", info.filename):
+                data = _fit_sheet_xml(data.decode("utf-8")).encode("utf-8")
+            zout.writestr(info, data)
+
+
 def office_to_pdf_many(paths: list[Path], outdir: Path, progress: Progress = lambda m: None) -> dict:
     """Birden çok Office dosyasını TEK LibreOffice çağrısıyla PDF'e çevirir (her dosya için programı
     yeniden başlatmak en yavaş kısım). {kaynak: pdf} döndürür; çevrilemeyenler sözlükte olmaz."""
@@ -1014,9 +1134,15 @@ def office_to_pdf_many(paths: list[Path], outdir: Path, progress: Progress = lam
         staged = []
         for i, p in enumerate(paths):                  # aynı adlı dosyalar çakışmasın: sıra numarası
             dst = src_dir / f"{i:03d}{p.suffix.lower()}"
-            shutil.copyfile(p, dst)
+            if p.suffix.lower() in (".xlsx", ".xlsm"):
+                try:
+                    _excel_fit_width(p, dst)      # geniş tablolar sağdan bölünüp ayrı sayfalara taşmasın
+                except Exception:
+                    shutil.copyfile(p, dst)
+            else:
+                shutil.copyfile(p, dst)
             staged.append(dst)
-        progress(f"PDF'e çevriliyor: {len(paths)} dosya" if len(paths) > 1 else f"PDF'e çevriliyor: {paths[0].name}")
+        progress(T("PDF'e çevriliyor: {0} dosya", len(paths)) if len(paths) > 1 else T("PDF'e çevriliyor: {0}", paths[0].name))
         flags = 0x08000000 if sys.platform == "win32" else 0   # CREATE_NO_WINDOW
         with _LoProfile() as profile:
             cmd = [soffice, f"-env:UserInstallation={profile}", "--headless",
@@ -1028,20 +1154,20 @@ def office_to_pdf_many(paths: list[Path], outdir: Path, progress: Progress = lam
                 result[p] = produced
         shutil.rmtree(src_dir, ignore_errors=True)
         if not result and paths:
-            raise ConversionError(f"{paths[0].name} çevrilemedi.\n{r.stderr.strip()[:300]}")
+            raise ConversionError(T("{0} çevrilemedi.\n{1}", paths[0].name, r.stderr.strip()[:300]))
         return result
     if sys.platform == "win32":
         for i, p in enumerate(paths):
             out = outdir / f"{i:03d}.pdf"
-            progress(f"PDF'e çevriliyor: {p.name}")
+            progress(T("PDF'e çevriliyor: {0}", p.name))
             if _office_com_to_pdf(p, out):
                 result[p] = out
         if result:
             return result
     raise ConversionError(
-        "Office → PDF için LibreOffice gerekli (ücretsiz): "
+        T("Office → PDF için LibreOffice gerekli (ücretsiz): "
         "https://www.libreoffice.org/download\n"
-        "Windows'ta MS Office kuruluysa 'pip install pywin32' de yeterli.")
+        "Windows'ta MS Office kuruluysa 'pip install pywin32' de yeterli."))
 
 
 def office_to_pdf(paths: list[Path], progress: Progress, **_) -> list[Path]:
@@ -1056,8 +1182,8 @@ def office_to_pdf(paths: list[Path], progress: Progress, **_) -> list[Path]:
                 outputs.append(out)
     if missing:
         if not outputs:
-            raise ConversionError(f"{', '.join(missing)} çevrilemedi.")
-        progress(f"ℹ çevrilemedi: {', '.join(missing)}")
+            raise ConversionError(T("{0} çevrilemedi.", ', '.join(missing)))
+        progress(T("ℹ çevrilemedi: {0}", ', '.join(missing)))
     return outputs
 
 
@@ -1134,6 +1260,9 @@ ACTIONS: list[Action] = [
     Action("delete",     "Sayfa sil…",                       PDF, _t("delete_pages"), G_PAGE, ask=PAGES_Q),
     Action("reverse",    "Sayfa sırasını ters çevir",        PDF, _t("reverse_pages"), G_PAGE),
     Action("blank",      "Boş sayfaları sil",                PDF, _t("remove_blank_pages", "docops"), G_PAGE),
+    Action("a4",         "Bütün sayfaları A4 yap",           PDF, _t("to_a4", "docops"), G_PAGE),
+    Action("splitsize",  "Boyuta göre böl… (ör. 10 MB)",     PDF, _t("split_by_size", "docops"), G_PAGE,
+           ask=("size", "Her parça en fazla kaç MB olsun? (ör. 10 ya da 9.5)", "10")),
     # --- Yazdır
     Action("nup2",       "2 sayfayı 1 kâğıda",               PDF, _t("n_up", "docops"), G_PRINT, kwargs={"per": 2}),
     Action("nup4",       "4 sayfayı 1 kâğıda",               PDF, _t("n_up", "docops"), G_PRINT, kwargs={"per": 4}),

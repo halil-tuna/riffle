@@ -24,6 +24,7 @@ import tempfile as _tf  # noqa: E402
 os.environ.setdefault("XDG_CONFIG_HOME", _tf.mkdtemp(prefix="riffle_test_cfg_"))
 os.environ.setdefault("RIFFLE_NO_MENU_REFRESH", "1")
 os.environ.setdefault("RIFFLE_NO_UPDATE_CHECK", "1")   # testler ağa çıkmasın
+os.environ.setdefault("RIFFLE_LANG", "tr")             # beklenen metinler Türkçe (İngilizce ayrı testlerde)
 
 FONT = _font_file()
 TR_TEXT = "Çalışma güçlü şişe ığdır ÖĞÜŞİ"

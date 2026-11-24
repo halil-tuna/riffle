@@ -15,6 +15,7 @@ from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
+from .i18n import T
 
 CANCEL = threading.Event()        # İptal düğmesi bunu kurar
 
@@ -81,7 +82,7 @@ def run_files(action_id: str, paths: list[Path], kwargs: dict, progress) -> tupl
     pending = {ex.submit(_run_one, action_id, str(p), kwargs): p for p in paths}
     done_count = 0
     fallback: list[Path] = []
-    progress(f"{n} dosya, {workers_for(n)} çekirdekte işleniyor…")
+    progress(T("{0} dosya, {1} çekirdekte işleniyor…", n, workers_for(n)))
     try:
         while pending:
             if CANCEL.is_set():
@@ -104,7 +105,7 @@ def run_files(action_id: str, paths: list[Path], kwargs: dict, progress) -> tupl
                     progress(m)
                 if err:
                     errors.append(err)
-                progress(f"{done_count}/{n} tamamlandı · {p.name}")
+                progress(T("{0}/{1} tamamlandı · {2}", done_count, n, p.name))
     finally:
         if not CANCEL.is_set():
             ex.shutdown(wait=True)
@@ -120,7 +121,7 @@ def run_files(action_id: str, paths: list[Path], kwargs: dict, progress) -> tupl
             except Exception as e:
                 errors.append(f"{p.name}: {type(e).__name__}: {e}")
             done_count += 1
-            progress(f"{done_count}/{n} tamamlandı · {p.name}")
+            progress(T("{0}/{1} tamamlandı · {2}", done_count, n, p.name))
     return outputs, errors
 
 
@@ -164,7 +165,7 @@ def word_parallel(src: Path, out: Path, n_pages: int, settings: dict, tmpdir: Pa
     bounds = [round(i * n_pages / k) for i in range(k + 1)]
     chunks = [list(range(bounds[i], bounds[i + 1])) for i in range(k) if bounds[i] < bounds[i + 1]]
     jobs = [(str(src), c, str(tmpdir / f"parca{i}.json"), settings) for i, c in enumerate(chunks)]
-    progress(f"Word'e çevriliyor: {n_pages} sayfa, {len(chunks)} çekirdekte")
+    progress(T("Word'e çevriliyor: {0} sayfa, {1} çekirdekte", n_pages, len(chunks)))
     stats: Counter = Counter()
     ex = ProcessPoolExecutor(len(chunks), mp_context=mp.get_context("spawn"))
     try:
@@ -177,11 +178,11 @@ def word_parallel(src: Path, out: Path, n_pages: int, settings: dict, tmpdir: Pa
             for f in done:
                 pending.pop(f)
                 stats.update(f.result())
-                progress(f"Word'e çevriliyor: {len(jobs) - len(pending)}/{len(jobs)} parça hazır")
+                progress(T("Word'e çevriliyor: {0}/{1} parça hazır", len(jobs) - len(pending), len(jobs)))
     finally:
         if not CANCEL.is_set():
             ex.shutdown(wait=True)
-    progress("Word dosyası kuruluyor…")
+    progress(T("Word dosyası kuruluyor…"))
     with patched_text(src):                      # alt simge yaması Word'ü kurarken de gerekli
         cv = Converter(str(src))
         try:

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import APP_NAME
+from .i18n import T
 
 EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".md", ".csv"}
 MAX_FILES = 5000
@@ -45,22 +46,22 @@ def _texts(path: Path):
             if d.needs_pass:
                 return
             for i, pg in enumerate(d):
-                yield f"s. {i + 1}", pg.get_text()
+                yield T("s. {0}", i + 1), pg.get_text()
     elif ext == ".docx":
         import docx
         doc = docx.Document(str(path))
         for i, para in enumerate(doc.paragraphs, 1):
             if para.text.strip():
-                yield f"paragraf {i}", para.text
+                yield T("paragraf {0}", i), para.text
         for t, table in enumerate(doc.tables, 1):
             for row in table.rows:
-                yield f"tablo {t}", " | ".join(c.text for c in row.cells)
+                yield T("tablo {0}", t), " | ".join(c.text for c in row.cells)
     elif ext == ".pptx":
         from pptx import Presentation
         prs = Presentation(str(path))
         for i, slide in enumerate(prs.slides, 1):
             parts = [sh.text_frame.text for sh in slide.shapes if getattr(sh, "has_text_frame", False)]
-            yield f"slayt {i}", "\n".join(parts)
+            yield T("slayt {0}", i), "\n".join(parts)
     elif ext == ".xlsx":
         from openpyxl import load_workbook
         wb = load_workbook(path, read_only=True, data_only=True)
@@ -80,7 +81,7 @@ def _texts(path: Path):
         else:
             return
         for i, line in enumerate(text.splitlines(), 1):
-            yield f"satır {i}", line
+            yield T("satır {0}", i), line
 
 
 def files_in(folder: Path) -> list[Path]:
@@ -150,22 +151,21 @@ def run(paths: list[Path], progress=print, query: str = "", **_) -> list[Path]:
         folder = folder.parent
 
     root = tk.Tk()
-    root.title(f"{APP_NAME} — Klasörde ara — {folder.name}")
+    root.title(T("{0} — Klasörde ara — {1}", APP_NAME, folder.name))
     root.geometry("980x600")
     root.minsize(640, 360)
     from . import theme
     theme.setup(root)
     head = ttk.Frame(root, padding=(20, 16, 20, 0))
     head.pack(fill="x")
-    ttk.Label(head, text="Klasörde ara", style="Heading.TLabel").pack(anchor="w")
-    ttk.Label(head, text=f"{folder.name} klasörü ve alt klasörleri · PDF, Word, PowerPoint, Excel, metin; "
-                         "Türkçe harf ve büyük/küçük farkı gözetmez", style="Muted.TLabel").pack(anchor="w")
+    ttk.Label(head, text=T("Klasörde ara"), style="Heading.TLabel").pack(anchor="w")
+    ttk.Label(head, text=T("{0} klasörü ve alt klasörleri · PDF, Word, PowerPoint, Excel, metin; Türkçe harf ve büyük/küçük farkı gözetmez", folder.name), style="Muted.TLabel").pack(anchor="w")
     top = ttk.Frame(root, padding=(20, 12, 20, 6))
     top.pack(fill="x")
     qv = tk.StringVar(value=query)
     ent = ttk.Entry(top, textvariable=qv, width=40)
     ent.pack(side="left", fill="x", expand=True)
-    btn = ttk.Button(top, text="Ara", style="Accent.TButton", width=10)
+    btn = ttk.Button(top, text=T("Ara"), style="Accent.TButton", width=10)
     btn.pack(side="left", padx=(8, 0))
     status = ttk.Label(root, padding=(20, 0), style="Muted.TLabel")
     status.pack(fill="x")
@@ -173,14 +173,14 @@ def run(paths: list[Path], progress=print, query: str = "", **_) -> list[Path]:
     frame = ttk.Frame(root, padding=(20, 8, 20, 4))
     frame.pack(fill="both", expand=True)
     tree = ttk.Treeview(frame, columns=("file", "where", "ctx"), show="headings", style="Results.Treeview")
-    for col, text, w in (("file", "Dosya", 220), ("where", "Yer", 90), ("ctx", "Geçtiği yer", 600)):
+    for col, text, w in (("file", T("Dosya"), 220), ("where", T("Yer"), 90), ("ctx", T("Geçtiği yer"), 600)):
         tree.heading(col, text=text)
         tree.column(col, width=w, anchor="w", stretch=(col == "ctx"))
     sb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=sb.set)
     tree.pack(side="left", fill="both", expand=True)
     sb.pack(side="left", fill="y")
-    ttk.Label(root, text="Çift tık ya da Enter: dosyayı aç · Esc: kapat", padding=(20, 0, 20, 12),
+    ttk.Label(root, text=T("Çift tık ya da Enter: dosyayı aç · Esc: kapat"), padding=(20, 0, 20, 12),
               style="Muted.TLabel").pack(anchor="w")
 
     state = {"gen": 0, "paths": {}}
@@ -192,13 +192,13 @@ def run(paths: list[Path], progress=print, query: str = "", **_) -> list[Path]:
         tree.delete(*tree.get_children())
         state["paths"].clear()
         if len(q.strip()) < 2:
-            status.configure(text="En az 2 harf yaz.")
+            status.configure(text=T("En az 2 harf yaz."))
             return
-        status.configure(text="Aranıyor…")
+        status.configure(text=T("Aranıyor…"))
 
         def work():
             res = search(folder, q, lambda m: root.after(0, lambda: gen == state["gen"] and
-                                                         status.configure(text=f"Aranıyor… {m}")),
+                                                         status.configure(text=T("Aranıyor… {0}", m))),
                          stop=lambda: gen != state["gen"])
             root.after(0, lambda: show(gen, *res))
 
@@ -211,13 +211,13 @@ def run(paths: list[Path], progress=print, query: str = "", **_) -> list[Path]:
             iid = tree.insert("", "end", values=(h.path.relative_to(folder), h.where, h.context))
             state["paths"][iid] = h.path
         files = len({h.path for h in hits})
-        msg = f"{len(hits)} sonuç, {files} dosyada." if hits else "Bulunamadı."
+        msg = T("{0} sonuç, {1} dosyada.", len(hits), files) if hits else T("Bulunamadı.")
         if scanned:
-            msg += f"  ·  {scanned} taranmış PDF'te metin yok (önce 'aranabilir yap')."
+            msg += T("  ·  {0} taranmış PDF'te metin yok (önce 'aranabilir yap').", scanned)
         if failed:
-            msg += f"  ·  {len(failed)} dosya okunamadı."
+            msg += T("  ·  {0} dosya okunamadı.", len(failed))
         status.configure(text=msg)
-        print(f"Arama: {msg}")
+        print(T("Arama: {0}", msg))
         sys.stdout.flush()
 
     def open_sel(_e=None):

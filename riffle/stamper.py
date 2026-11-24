@@ -19,9 +19,20 @@ from pathlib import Path
 from . import APP_NAME
 from . import stamp_model as sm
 from .actions import open_pdf, pymupdf
+from .i18n import T
 
 COLORS = {"Lacivert": (0.05, 0.1, 0.4), "Siyah": (0, 0, 0), "Mavi": (0.1, 0.3, 0.85), "Kırmızı": (0.75, 0.05, 0.05)}
 HANDLE = 9
+
+
+def _color(shown: str):
+    """Menüde görünen (çevrilmiş) renk adından renk."""
+    for name, rgb in COLORS.items():
+        if T(name) == shown:
+            return rgb
+    return COLORS["Lacivert"]
+
+
 SEL = "#2f6fdd"
 
 
@@ -39,14 +50,14 @@ def signature_dialog(parent):
     from tkinter import filedialog, messagebox, ttk
     W, H = 600, 220
     top = tk.Toplevel(parent)
-    top.title(f"{APP_NAME} — İmza")
+    top.title(T("{0} — İmza", APP_NAME))
     top.transient(parent)
     top.resizable(False, False)
     from . import theme
     theme.window(top)
     pal = theme.palette()
-    ttk.Label(top, text="İmzanı at", style="Strong.TLabel", padding=(16, 14, 16, 0)).pack(anchor="w")
-    ttk.Label(top, text="Fareyle ya da dokunmatik kalemle çiz; veya beyaz kâğıda attığın imzanın fotoğrafını yükle.",
+    ttk.Label(top, text=T("İmzanı at"), style="Strong.TLabel", padding=(16, 14, 16, 0)).pack(anchor="w")
+    ttk.Label(top, text=T("Fareyle ya da dokunmatik kalemle çiz; veya beyaz kâğıda attığın imzanın fotoğrafını yükle."),
               style="Muted.TLabel", padding=(16, 2, 16, 10)).pack(anchor="w")
     cv = tk.Canvas(top, width=W, height=H, background="white", highlightthickness=1,
                    highlightbackground=pal.border, cursor="pencil")
@@ -70,9 +81,9 @@ def signature_dialog(parent):
         cv.delete("ink")
 
     def load():
-        f = filedialog.askopenfilename(parent=top, title="İmza fotoğrafı",
-                                       filetypes=[("Görseller", "*.png *.jpg *.jpeg *.heic *.bmp *.webp"),
-                                                  ("Tümü", "*.*")])
+        f = filedialog.askopenfilename(parent=top, title=T("İmza fotoğrafı"),
+                                       filetypes=[(T("Görseller"), "*.png *.jpg *.jpeg *.heic *.bmp *.webp"),
+                                                  (T("Tümü"), "*.*")])
         if not f:
             return
         try:
@@ -85,7 +96,7 @@ def signature_dialog(parent):
 
     def ok():
         if not strokes:
-            messagebox.showinfo(APP_NAME, "Önce imzanı çiz ya da fotoğraf yükle.", parent=top)
+            messagebox.showinfo(APP_NAME, T("Önce imzanı çiz ya da fotoğraf yükle."), parent=top)
             return
         result["png"] = sm.strokes_to_png(strokes, (W, H))
         top.destroy()
@@ -94,10 +105,10 @@ def signature_dialog(parent):
     cv.bind("<B1-Motion>", move)
     row = ttk.Frame(top, padding=(16, 12, 16, 14))
     row.pack(fill="x")
-    ttk.Button(row, text="Temizle", command=clear).pack(side="left")
-    ttk.Button(row, text="Fotoğraftan yükle…", command=load).pack(side="left", padx=8)
-    ttk.Button(row, text="Tamam", style="Accent.TButton", width=10, command=ok).pack(side="right")
-    ttk.Button(row, text="İptal", width=10, command=top.destroy).pack(side="right", padx=8)
+    ttk.Button(row, text=T("Temizle"), command=clear).pack(side="left")
+    ttk.Button(row, text=T("Fotoğraftan yükle…"), command=load).pack(side="left", padx=8)
+    ttk.Button(row, text=T("Tamam"), style="Accent.TButton", width=10, command=ok).pack(side="right")
+    ttk.Button(row, text=T("İptal"), width=10, command=top.destroy).pack(side="right", padx=8)
     top.bind("<Return>", lambda e: ok())
     top.bind("<Escape>", lambda e: top.destroy())
     top.grab_set()
@@ -115,7 +126,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     doc = open_pdf(src)
 
     root = tk.Tk()
-    root.title(f"{APP_NAME} — İmza / yazı / görsel ekle — {src.name}")
+    root.title(T("{0} — İmza / yazı / görsel ekle — {1}", APP_NAME, src.name))
     root.geometry(f"{min(1000, root.winfo_screenwidth() - 60)}x{min(860, root.winfo_screenheight() - 80)}")
     root.minsize(560, 480)
     from . import theme
@@ -213,10 +224,10 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             if s.uid == state["sel"]:
                 canvas.create_rectangle(a, b, c, d, outline=SEL, dash=(4, 2), width=1.5)
                 canvas.create_rectangle(c - HANDLE, d - HANDLE, c + 2, d + 2, fill=SEL, outline="white")
-        pg_lbl.configure(text=f"Sayfa {state['page'] + 1} / {len(doc)}")
+        pg_lbl.configure(text=T("Sayfa {0} / {1}", state['page'] + 1, len(doc)))
         n = len(stamps)
-        status.configure(text=(f"{n} öğe eklendi · sürükle: taşı · köşe: boyut · çift tık: yazıyı düzenle"
-                               if n else "Araç çubuğundan imza, görsel ya da yazı ekle."))
+        status.configure(text=(T("{0} öğe eklendi · sürükle: taşı · köşe: boyut · çift tık: yazıyı düzenle", n)
+                               if n else T("Araç çubuğundan imza, görsel ya da yazı ekle.")))
 
     # ------------------------------------------------------------------ ekleme
     def add(stamp: sm.Stamp):
@@ -246,9 +257,9 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             add_image(png, width=150)
 
     def add_picture():
-        f = filedialog.askopenfilename(parent=root, title="Görsel / logo / kaşe seç",
-                                       filetypes=[("Görseller", "*.png *.jpg *.jpeg *.heic *.heif *.bmp *.webp *.gif"),
-                                                  ("Tümü", "*.*")])
+        f = filedialog.askopenfilename(parent=root, title=T("Görsel / logo / kaşe seç"),
+                                       filetypes=[(T("Görseller"), "*.png *.jpg *.jpeg *.heic *.heif *.bmp *.webp *.gif"),
+                                                  (T("Tümü"), "*.*")])
         if f:
             try:
                 add_image(sm.image_bytes(Path(f)), width=140)
@@ -257,13 +268,13 @@ def run(paths: list[Path], progress=print) -> list[Path]:
 
     def add_text(text=None, size=14):
         if text is None:
-            text = _dialog("Eklenecek yazı (alt satır için \\n):", parent=root)
+            text = _dialog(T("Eklenecek yazı (alt satır için \\n):"), parent=root)
             if not text or not text.strip():
                 return
             text = text.replace("\\n", "\n")
         r = page_rect()
         rect = sm.text_rect(text, (r.width * 0.12, r.height * 0.82), size)
-        return add(sm.Stamp("text", state["page"], sm.clamp(rect, r), text=text, color=COLORS[color.get()]))
+        return add(sm.Stamp("text", state["page"], sm.clamp(rect, r), text=text, color=_color(color.get())))
 
     def add_date():
         add_text(sm.today_text(), 12)
@@ -279,25 +290,25 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     def all_pages():
         s = selected()
         if not s:
-            messagebox.showinfo(APP_NAME, "Önce bir öğe seç.", parent=root)
+            messagebox.showinfo(APP_NAME, T("Önce bir öğe seç."), parent=root)
             return
         snapshot()
         others = [x for x in range(len(doc)) if x != s.page]
         for c in sm.copy_to_pages(s, others):
             c.rect = sm.clamp(c.rect, doc[c.page].rect)
             stamps.append(c)
-        status.configure(text=f"Seçili öğe {len(others)} sayfaya daha kopyalandı.")
+        status.configure(text=T("Seçili öğe {0} sayfaya daha kopyalandı.", len(others)))
         redraw()
 
     def set_color(*_):
         s = selected()
         if s and s.kind == "text":
             snapshot()
-            s.color = COLORS[color.get()]
+            s.color = _color(color.get())
             redraw()
 
     def edit_text(s):
-        t = _dialog("Yazı:", s.text.replace("\n", "\\n"), parent=root)
+        t = _dialog(T("Yazı:"), s.text.replace("\n", "\\n"), parent=root)
         if t and t.strip():
             snapshot()
             t = t.replace("\\n", "\n")
@@ -317,9 +328,9 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     # ------------------------------------------------------------------ kaydet
     def save():
         if not stamps:
-            messagebox.showinfo(APP_NAME, "Eklenmiş öğe yok.", parent=root)
+            messagebox.showinfo(APP_NAME, T("Eklenmiş öğe yok."), parent=root)
             return
-        status.configure(text="Kaydediliyor…")
+        status.configure(text=T("Kaydediliyor…"))
         root.update_idletasks()
         try:
             out = sm.apply(src, stamps)
@@ -327,9 +338,9 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             messagebox.showerror(APP_NAME, str(e), parent=root)
             return
         saved.append(out)
-        print("Tamamlandı:", out.name)
+        print(T("Tamamlandı:"), out.name)
         sys.stdout.flush()
-        status.configure(text=f"✔ Kaydedildi: {out.name}  →  {out.parent}")
+        status.configure(text=T("✔ Kaydedildi: {0}  →  {1}", out.name, out.parent))
         open_btn.configure(state="normal")
 
     def open_folder():
@@ -423,19 +434,19 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     key("<Control-g>", all_pages)
 
     # ------------------------------------------------------------------ araç çubuğu
-    btn(bar, "✍ İmzam", my_signature)
-    btn(bar, "Yeni imza", new_signature)
+    btn(bar, T("✍ İmzam"), my_signature)
+    btn(bar, T("Yeni imza"), new_signature)
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
-    btn(bar, "🖼 Görsel", add_picture)
-    btn(bar, "T Yazı", add_text)
-    btn(bar, "Tarih", add_date)
-    color = tk.StringVar(value="Lacivert")
-    cb = ttk.Combobox(bar, textvariable=color, values=list(COLORS), state="readonly", width=9)
+    btn(bar, T("🖼 Görsel"), add_picture)
+    btn(bar, T("T Yazı"), add_text)
+    btn(bar, T("Tarih"), add_date)
+    color = tk.StringVar(value=T("Lacivert"))
+    cb = ttk.Combobox(bar, textvariable=color, values=[T(c) for c in COLORS], state="readonly", width=9)
     cb.pack(side="left", padx=4)
     cb.bind("<<ComboboxSelected>>", set_color)
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
-    btn(bar, "Her sayfaya", all_pages)
-    btn(bar, "Sil", delete)
+    btn(bar, T("Her sayfaya"), all_pages)
+    btn(bar, T("Sil"), delete)
     btn(bar, "↶", undo)
     nav = ttk.Frame(foot)                       # sayfa gezinmesi alt çubukta: dar pencerede de görünür
     nav.pack(side="left", padx=(0, 10))
@@ -444,8 +455,8 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     pg_lbl.pack(side="left")
     ttk.Button(nav, text="▶", width=3, command=lambda: go(1), style="Tool.TButton").pack(side="left")
 
-    ttk.Button(foot, text="Kaydet", command=save, style="Accent.TButton", width=12).pack(side="right", padx=(6, 0))
-    open_btn = ttk.Button(foot, text="Klasörü aç", command=open_folder, state="disabled", style="Tool.TButton")
+    ttk.Button(foot, text=T("Kaydet"), command=save, style="Accent.TButton", width=12).pack(side="right", padx=(6, 0))
+    open_btn = ttk.Button(foot, text=T("Klasörü aç"), command=open_folder, state="disabled", style="Tool.TButton")
     open_btn.pack(side="right", padx=2)
     status.pack(side="left", fill="x", expand=True)
 

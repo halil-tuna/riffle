@@ -9,20 +9,20 @@ The everyday tools of online PDF sites (merge, split, compress, convert, sign, O
 without limits**, straight from the **right-click menu** of Windows 11 and Linux Mint (Nemo).
 Your files never leave your computer.
 
-> The user interface is in **Turkish** (the app was built for Turkish students and offices: Turkish OCR,
-> Turkish ID/IBAN redaction, e-Devlet upload size limits). The code and this page are open to everyone.
+> **English and Turkish interface.** Riffle follows your system language; switch it any time in
+> *Settings → Language*. Menus, windows, messages, output file names and the installer are all translated.
 
-![Page organizer](docs/screenshots/organizer.png)
+![Page organizer](docs/screenshots/en/organizer.png)
 
 ## Highlights
 
-- **60 tools in the context menu** — select files, right-click, done. Multiple selection works everywhere
+- **62 tools in the context menu** — select files, right-click, done. Multiple selection works everywhere
   (Windows launches one process per file; Riffle gathers them into one job).
 - **PDF → Word that keeps the layout** — built on pdf2docx with a large repair layer: table widths, two-column
   articles, lost symbol fonts (μ, α, β recovered from glyph names), hyphenation, sub/superscripts, rules and
   page flow. Slides and two-column papers get an exact-layout mode with editable text boxes.
   Measured with a round-trip benchmark (PDF → Word → PDF, text + visual + page score):
-  **93.4 / 100** average over a mixed corpus of reports, articles, slides, tables and scanned pages.
+  **94.9 / 100** average over a mixed corpus of reports, articles, slides, tables and scanned pages.
 - **Scanned documents** — Tesseract OCR with automatic cleanup for shadowed, faded or phone-photographed
   pages, deskew, table reconstruction, and font size / bold detection so the Word output looks like the scan.
 - **Page organizer** — thumbnails of PDFs, images (incl. iPhone HEIC) and Office files together; drag to
@@ -32,9 +32,11 @@ Your files never leave your computer.
 - **Fill PDF forms**, **redact personal data** (real removal; Turkish ID and IBAN validated by checksum),
   **compare two PDFs**, **search inside a folder** (PDF, Word, PowerPoint, Excel, text; accent-insensitive),
   **photo → scanned document** (corner detection, true-aspect perspective correction),
-  **compress to a target size** (e.g. under 2 MB), **PDF/A**, **PDF → Markdown**, print layouts (2/4/6-up,
+  **compress to a target size** (e.g. under 2 MB), **split by size** (e.g. 10 MB parts for e-mail),
+  **make all pages A4** (mixed Letter/A5/phone scans/slides fitted and centred, text stays vector), **PDF/A**, **PDF → Markdown**, print layouts (2/4/6-up,
   booklet, grayscale) and more.
-- **Word, Excel, PowerPoint and images, too** — shrink Office files by recompressing their pictures (photo-heavy
+- **Word, Excel, PowerPoint and images, too** — Excel → PDF fits wide sheets to the page width (landscape when
+  needed) instead of cutting columns onto extra pages; shrink Office files by recompressing their pictures (photo-heavy
   decks fit in an e-mail again), merge Word documents into one .docx (styles, images and numbered lists kept),
   turn CSV files into clean Excel sheets (encoding and delimiter detected; `1.234,56` and `1,234.56` numbers,
   European and US dates — ambiguous ones left as text; IDs and leading-zero numbers kept as text), slide handouts with note lines, extract pictures; for images: OCR straight to the clipboard (equations and figures it cannot read are marked, not silently dropped),
@@ -48,15 +50,15 @@ Your files never leave your computer.
 
 | | |
 |---|---|
-| ![Merge order](docs/screenshots/order.png) | ![Done](docs/screenshots/done.png) |
-| ![Signature and stamps](docs/screenshots/stamp.png) | ![Folder search](docs/screenshots/search.png) |
-| ![Settings, dark mode](docs/screenshots/settings-dark.png) | ![Organizer, dark mode](docs/screenshots/organizer-dark.png) |
+| ![Merge order](docs/screenshots/en/order.png) | ![Done](docs/screenshots/en/done.png) |
+| ![Signature and stamps](docs/screenshots/en/stamp.png) | ![Folder search](docs/screenshots/en/search.png) |
+| ![Settings, dark mode](docs/screenshots/en/settings-dark.png) | ![Organizer, dark mode](docs/screenshots/en/organizer-dark.png) |
 
 ## Install
 
 ### Windows 10 / 11 — installer
 
-Download `Riffle-<version>-kurulum.exe` from **[Releases](https://github.com/halil-tuna/riffle/releases)**
+Download `Riffle-<version>-setup.exe` from **[Releases](https://github.com/halil-tuna/riffle/releases)**
 and run it (no admin rights needed). The context-menu entries are added automatically and removed on
 uninstall. On Windows 11 they are under **Show more options** (Shift+F10).
 
@@ -111,6 +113,8 @@ riffle/imagetools.py    image OCR, target size, PNG, rotate
 riffle/update.py        weekly update notice (GitHub Releases)
 riffle/forms.py         form filling        riffle/search.py   folder search
 riffle/settings.py      settings, favourites, output folder, appearance
+riffle/i18n.py          languages: T("…") wrapper, system-language detection, setting
+riffle/i18n_en.py       English catalogue (source strings are Turkish; tests/i18n_scan.py lists missing ones)
 riffle/theme.py         shared look: Windows 11 theme, light/dark, colours, icon
 riffle/parallel.py      parallel batches, chunked PDF → Word, cancellation
 riffle/ui.py            progress, order and input dialogs (tkinter)
@@ -128,6 +132,12 @@ Adding a tool: a function in `tools.py` / `docops.py` plus one line in `ACTIONS`
   PDF → Word → PDF round trip (text / visual / pages) and lists Word-specific risks.
 - **Package:** `pip install pyinstaller && python packaging/build_exe.py` → `dist/Riffle/`, then
   `iscc packaging\installer.iss` on Windows. Pushing a `v*` tag builds and publishes the installer.
+
+### Translations
+
+Every user-visible string is wrapped as `T("…")` with the Turkish text as the key; `riffle/i18n_en.py` maps it
+to English. `python tests/i18n_scan.py` lists strings without a translation, and the test suite fails on
+untranslated or unwrapped UI strings, mismatched placeholders, or Turkish characters in the English menus.
 
 ## Known limits
 

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from .actions import ConversionError, fix_tounicode, human_size, open_pdf, pymupdf, sorted_by_name, unique_path
+from .i18n import T
 
 # ============================================================ karartma
 
@@ -82,7 +83,7 @@ def redact(paths, progress, words: str = "", **_):
         textless = 0
         with open_pdf(p) as doc:
             for i, page in enumerate(doc):
-                progress(f"{p.name}: sayfa {i + 1}/{len(doc)} taranıyor")
+                progress(T("{0}: sayfa {1}/{2} taranıyor", p.name, i + 1, len(doc)))
                 text = page.get_text()
                 if len(text.strip()) < 10 and page.get_images():
                     textless += 1
@@ -104,12 +105,12 @@ def redact(paths, progress, words: str = "", **_):
             out = unique_path(p.parent, f"{p.stem}_karartilmis", ".pdf")
             doc.save(out, garbage=4, deflate=True, clean=True)
         if counts:
-            progress("ℹ " + p.name + ": " + ", ".join(f"{v} {k}" for k, v in counts.items()) +
-                     " karartıldı (metin dosyadan silindi, kopyalanamaz).")
+            progress("ℹ " + p.name + ": " + ", ".join(f"{v} {T(k)}" for k, v in counts.items()) +
+                     T(" karartıldı (metin dosyadan silindi, kopyalanamaz)."))
         else:
-            progress(f"ℹ {p.name}: karartılacak bilgi bulunamadı; belge meta verisi temizlendi.")
+            progress(T("ℹ {0}: karartılacak bilgi bulunamadı; belge meta verisi temizlendi.", p.name))
         if textless:
-            progress(f"ℹ {textless} taranmış sayfada metin yok; önce 'aranabilir yap (OCR)' kullan.")
+            progress(T("ℹ {0} taranmış sayfada metin yok; önce 'aranabilir yap (OCR)' kullan.", textless))
         outputs.append(out)
     return outputs
 
@@ -131,10 +132,10 @@ def _norm(w: str) -> str:
 
 def compare(paths, progress, ordered: bool = False, **_):
     if len(paths) != 2:
-        raise ConversionError("Karşılaştırmak için tam 2 PDF seç (eski ve yeni sürüm).")
+        raise ConversionError(T("Karşılaştırmak için tam 2 PDF seç (eski ve yeni sürüm)."))
     old_p, new_p = paths if ordered else sorted_by_name(paths)
     with open_pdf(old_p) as old, open_pdf(new_p) as new:
-        progress("Metinler karşılaştırılıyor…")
+        progress(T("Metinler karşılaştırılıyor…"))
         ow, nw = _words(old), _words(new)
         sm = difflib.SequenceMatcher(None, [_norm(w[2]) for w in ow], [_norm(w[2]) for w in nw], autojunk=False)
         deleted = inserted = 0
@@ -156,7 +157,7 @@ def compare(paths, progress, ordered: bool = False, **_):
 
         report = pymupdf.open()
         _summary(report, old_p, new_p, deleted, inserted, changes, sm.ratio())
-        progress("Rapor hazırlanıyor…")
+        progress(T("Rapor hazırlanıyor…"))
         gap = 18
         for i in range(max(len(old), len(new))):
             wo = old[i].rect.width if i < len(old) else 0
@@ -166,18 +167,17 @@ def compare(paths, progress, ordered: bool = False, **_):
             from .ocr import _font_file
             ff = _font_file()
             fk = dict(fontname="baslik", fontfile=ff) if ff else {}
-            pg.insert_text((gap, 26), f"Sayfa {i + 1} · ESKİ: {old_p.name}", fontsize=10, color=(0.6, 0, 0), **fk)
-            pg.insert_text((wo + 2 * gap, 26), f"YENİ: {new_p.name}", fontsize=10, color=(0, 0.45, 0), **fk)
+            pg.insert_text((gap, 26), T("Sayfa {0} · ESKİ: {1}", i + 1, old_p.name), fontsize=10, color=(0.6, 0, 0), **fk)
+            pg.insert_text((wo + 2 * gap, 26), T("YENİ: {0}", new_p.name), fontsize=10, color=(0, 0.45, 0), **fk)
             if i < len(old):
                 pg.show_pdf_page(pymupdf.Rect(gap, 36, gap + wo, 36 + old[i].rect.height), old, i)
             if i < len(new):
                 pg.show_pdf_page(pymupdf.Rect(wo + 2 * gap, 36, wo + 2 * gap + wn, 36 + new[i].rect.height), new, i)
         fix_tounicode(report)
-        report.set_toc([[1, "Özet", 1]] + [[1, f"Sayfa {i + 1}", i + 2] for i in range(len(report) - 1)])
+        report.set_toc([[1, T("Özet"), 1]] + [[1, T("Sayfa {0}", i + 1), i + 2] for i in range(len(report) - 1)])
         out = unique_path(new_p.parent, f"karsilastirma_{old_p.stem}_{new_p.stem}", ".pdf")
         report.save(out, garbage=3, deflate=True)
-    progress(f"ℹ {deleted} kelime silindi (kırmızı), {inserted} kelime eklendi (yeşil); "
-             f"benzerlik %{sm.ratio() * 100:.0f}.")
+    progress(T("ℹ {0} kelime silindi (kırmızı), {1} kelime eklendi (yeşil); benzerlik %{2:.0f}.", deleted, inserted, sm.ratio() * 100))
     return [out]
 
 
@@ -193,22 +193,22 @@ def _summary(report, old_p, new_p, deleted, inserted, changes, ratio):
         page.insert_text((50, y), text[:110], fontsize=size, color=color, **kw)
         y += dy or size * 1.6
 
-    line("Karşılaştırma raporu", 18, dy=34)
-    line(f"Eski sürüm: {old_p.name}", 11, (0.6, 0, 0))
-    line(f"Yeni sürüm: {new_p.name}", 11, (0, 0.45, 0), dy=26)
-    line(f"Benzerlik: %{ratio * 100:.0f}   ·   silinen kelime: {deleted}   ·   eklenen kelime: {inserted}", 11, dy=30)
-    line("Değişiklikler (ilk 40):", 12, dy=22)
+    line(T("Karşılaştırma raporu"), 18, dy=34)
+    line(T("Eski sürüm: {0}", old_p.name), 11, (0.6, 0, 0))
+    line(T("Yeni sürüm: {0}", new_p.name), 11, (0, 0.45, 0), dy=26)
+    line(T("Benzerlik: %{0:.0f}   ·   silinen kelime: {1}   ·   eklenen kelime: {2}", ratio * 100, deleted, inserted), 11, dy=30)
+    line(T("Değişiklikler (ilk 40):"), 12, dy=22)
     for old_t, new_t, op, np_ in changes[:40]:
         if y > 800:
             break
-        where = f"s.{(np_ if np_ is not None else op) + 1}"
+        where = T("s.{0}", (np_ if np_ is not None else op) + 1)
         if old_t:
             line(f"{where}  − {old_t}", 9, (0.7, 0, 0), dy=13)
         if new_t:
             line(f"{where}  + {new_t}", 9, (0, 0.5, 0), dy=13)
         y += 4
     if not changes:
-        line("Metin farkı yok.", 11, (0, 0.45, 0))
+        line(T("Metin farkı yok."), 11, (0, 0.45, 0))
 
 
 # ============================================================ kenar kırp
@@ -221,7 +221,7 @@ def autocrop(paths, progress, margin: float = 12.0, **_):
         cropped = 0
         with open_pdf(p) as doc:
             for i, page in enumerate(doc):
-                progress(f"{p.name}: sayfa {i + 1}/{len(doc)}")
+                progress(T("{0}: sayfa {1}/{2}", p.name, i + 1, len(doc)))
                 pix = page.get_pixmap(dpi=72, colorspace=pymupdf.csGRAY, alpha=False, annots=False)
                 a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
                 ys, xs = np.where(a < 240)
@@ -239,7 +239,7 @@ def autocrop(paths, progress, margin: float = 12.0, **_):
                 cropped += 1
             out = unique_path(p.parent, f"{p.stem}_kirpilmis", ".pdf")
             doc.save(out, garbage=3, deflate=True)
-        progress(f"ℹ {p.name}: {cropped} sayfanın beyaz kenarları kırpıldı.")
+        progress(T("ℹ {0}: {1} sayfanın beyaz kenarları kırpıldı.", p.name, cropped))
         outputs.append(out)
     return outputs
 
@@ -250,7 +250,7 @@ def autocrop(paths, progress, margin: float = 12.0, **_):
 def pdf_to_markdown(paths, progress, **_):
     outputs = []
     for p in paths:
-        progress(f"Markdown'a çevriliyor: {p.name}")
+        progress(T("Markdown'a çevriliyor: {0}", p.name))
         with open_pdf(p) as doc:
             try:
                 import pymupdf4llm
@@ -266,7 +266,7 @@ def pdf_to_markdown(paths, progress, **_):
         out = unique_path(p.parent, p.stem, ".md")
         out.write_text(md, encoding="utf-8")
         if empty:
-            progress(f"ℹ {p.name}: {empty} sayfada metin yok (taranmış olabilir; önce OCR).")
+            progress(T("ℹ {0}: {1} sayfada metin yok (taranmış olabilir; önce OCR).", p.name, empty))
         outputs.append(out)
     return outputs
 
@@ -310,12 +310,12 @@ def pdf_to_pdfa(paths, progress, **_):
     import tempfile
     gs = find_ghostscript()
     if not gs:
-        raise ConversionError("PDF/A için Ghostscript gerekli (ücretsiz, AGPL).\n"
-                              "Windows: ghostscript.com/releases/gsdnld.html · Linux: sudo apt install ghostscript")
+        raise ConversionError(T("PDF/A için Ghostscript gerekli (ücretsiz, AGPL).\n"
+                              "Windows: ghostscript.com/releases/gsdnld.html · Linux: sudo apt install ghostscript"))
     from PIL import ImageCms
     outputs = []
     for p in paths:
-        progress(f"PDF/A-2b'ye çevriliyor: {p.name}")
+        progress(T("PDF/A-2b'ye çevriliyor: {0}", p.name))
         out = unique_path(p.parent, f"{p.stem}_PDFA", ".pdf")
         with tempfile.TemporaryDirectory(prefix="riffle_pdfa_") as tmp:
             src = Path(tmp) / "girdi.pdf"
@@ -334,7 +334,7 @@ def pdf_to_pdfa(paths, progress, **_):
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
                                creationflags=0x08000000 if sys.platform == "win32" else 0)
         if r.returncode != 0 or not out.exists():
-            raise ConversionError(f"{p.name}: Ghostscript PDF/A üretemedi.\n{(r.stderr or r.stdout)[-300:]}")
+            raise ConversionError(T("{0}: Ghostscript PDF/A üretemedi.\n{1}", p.name, (r.stderr or r.stdout)[-300:]))
         outputs.append(out)
     return outputs
 
@@ -392,7 +392,7 @@ def n_up(paths, progress, per: int = 4, frame: bool = True, **_):
             oy = (H - rows * ch - (rows - 1) * gap) / 2
             out = pymupdf.open()
             for k in range(0, n, per):
-                progress(f"{p.name}: kâğıt {k // per + 1}/{-(-n // per)}")
+                progress(T("{0}: kâğıt {1}/{2}", p.name, k // per + 1, -(-n // per)))
                 sheet = out.new_page(width=W, height=H)
                 for j in range(per):
                     if k + j >= n:
@@ -412,7 +412,7 @@ def n_up(paths, progress, per: int = 4, frame: bool = True, **_):
             out.save(o, garbage=3, deflate=True)
             sheets = len(out)
             out.close()
-        progress(f"ℹ {p.name}: {n} sayfa → {sheets} kâğıt ({rows}×{cols}, {'yatay' if land else 'dikey'} A4).")
+        progress(T("ℹ {0}: {1} sayfa → {2} kâğıt ({3}×{4}, {5} A4).", p.name, n, sheets, rows, cols, 'yatay' if land else 'dikey'))
         outputs.append(o)
     return outputs
 
@@ -441,7 +441,7 @@ def booklet(paths, progress, **_):
             W, H = A4[1], A4[0]                        # yatay A4, iki A5 yarım
             m = 14
             for i, (left, right) in enumerate(booklet_order(n)):
-                progress(f"{p.name}: kâğıt yüzü {i + 1}")
+                progress(T("{0}: kâğıt yüzü {1}", p.name, i + 1))
                 sheet = out.new_page(width=W, height=H)
                 for k, idx in enumerate((left, right)):
                     if idx is None:
@@ -452,8 +452,8 @@ def booklet(paths, progress, **_):
             out.save(o, garbage=3, deflate=True)
             out.close()
         blanks = -(-n // 4) * 4 - n
-        progress(f"ℹ {p.name}: çift taraflı, KISA kenardan çevirerek bas, ortadan katla"
-                 + (f" ({blanks} boş sayfa eklendi)." if blanks else "."))
+        progress(T("ℹ {0}: çift taraflı, KISA kenardan çevirerek bas, ortadan katla", p.name)
+                 + (T(" ({0} boş sayfa eklendi).", blanks) if blanks else "."))
         outputs.append(o)
     return outputs
 
@@ -461,13 +461,13 @@ def booklet(paths, progress, **_):
 def grayscale(paths, progress, **_):
     outputs = []
     for p in paths:
-        progress(f"Siyah-beyaz yapılıyor: {p.name}")
+        progress(T("Siyah-beyaz yapılıyor: {0}", p.name))
         with open_pdf(p) as doc:
             before = p.stat().st_size
             try:
                 doc.recolor(1)                         # yazı, çizim ve resimler gri; metin seçilebilir kalır
             except Exception as e:
-                raise ConversionError(f"{p.name}: gri tonlamaya çevrilemedi ({e}).")
+                raise ConversionError(T("{0}: gri tonlamaya çevrilemedi ({1}).", p.name, e))
             o = unique_path(p.parent, f"{p.stem}_siyah_beyaz", ".pdf")
             doc.save(o, garbage=4, deflate=True, deflate_images=True)
         progress(f"ℹ {p.name}: {human_size(before)} → {human_size(o.stat().st_size)}")
@@ -539,7 +539,7 @@ def fix_scan(paths, progress, **_):
         with open_pdf(p) as doc:
             fixed, blanks = [], []
             for i, page in enumerate(doc):
-                progress(f"{p.name}: sayfa {i + 1}/{len(doc)}")
+                progress(T("{0}: sayfa {1}/{2}", p.name, i + 1, len(doc)))
                 if is_blank(page):
                     blanks.append(i)
                     continue
@@ -558,15 +558,15 @@ def fix_scan(paths, progress, **_):
             elif blanks:
                 blanks = []                      # hepsi boşsa hiçbirini silme
             if not fixed and not blanks:
-                progress(f"ℹ {p.name}: eğik ya da boş sayfa bulunamadı, dosya değiştirilmedi.")
+                progress(T("ℹ {0}: eğik ya da boş sayfa bulunamadı, dosya değiştirilmedi.", p.name))
                 continue
             out = unique_path(p.parent, f"{p.stem}_duzeltilmis", ".pdf")
             doc.save(out, garbage=3, deflate=True)
         parts = []
         if fixed:
-            parts.append(f"{len(fixed)} sayfanın eğikliği düzeltildi (en çok {max(abs(a) for _, a in fixed):.1f}°)")
+            parts.append(T("{0} sayfanın eğikliği düzeltildi (en çok {1:.1f}°)", len(fixed), max(abs(a) for _, a in fixed)))
         if blanks:
-            parts.append(f"{len(blanks)} boş sayfa silindi (s. {', '.join(str(b + 1) for b in blanks[:10])})")
+            parts.append(T("{0} boş sayfa silindi (s. {1})", len(blanks), ', '.join(str(b + 1) for b in blanks[:10])))
         progress(f"ℹ {p.name}: " + "; ".join(parts) + ".")
         outputs.append(out)
     return outputs
@@ -578,14 +578,14 @@ def remove_blank_pages(paths, progress, **_):
         with open_pdf(p) as doc:
             blanks = [i for i, pg in enumerate(doc) if is_blank(pg)]
             if not blanks:
-                progress(f"ℹ {p.name}: boş sayfa yok.")
+                progress(T("ℹ {0}: boş sayfa yok.", p.name))
                 continue
             if len(blanks) == len(doc):
-                raise ConversionError(f"{p.name}: bütün sayfalar boş görünüyor, silinmedi.")
+                raise ConversionError(T("{0}: bütün sayfalar boş görünüyor, silinmedi.", p.name))
             doc.delete_pages(blanks)
             out = unique_path(p.parent, f"{p.stem}_bossuz", ".pdf")
             doc.save(out, garbage=3, deflate=True)
-        progress(f"ℹ {p.name}: {len(blanks)} boş sayfa silindi (s. {', '.join(str(b + 1) for b in blanks[:15])}).")
+        progress(T("ℹ {0}: {1} boş sayfa silindi (s. {2}).", p.name, len(blanks), ', '.join(str(b + 1) for b in blanks[:15])))
         outputs.append(out)
     return outputs
 
@@ -603,7 +603,7 @@ def extract_images(paths, progress, min_side: int = 48, **_):
             seen_content: set = set()
             folder = None
             for pno, page in enumerate(doc):
-                progress(f"{p.name}: sayfa {pno + 1}/{len(doc)}")
+                progress(T("{0}: sayfa {1}/{2}", p.name, pno + 1, len(doc)))
                 for k, im in enumerate(page.get_images(full=True), 1):
                     xref, smask = im[0], im[1]
                     if xref in seen:
@@ -629,7 +629,7 @@ def extract_images(paths, progress, min_side: int = 48, **_):
                     seen_content |= keys
                     if folder is None:
                         folder = unique_dir(p.parent, f"{p.stem}_resimler")
-                    name = f"sayfa{pno + 1:03d}_{k}"
+                    name = T("sayfa{0:03d}_{1}", pno + 1, k)
                     try:
                         if smask:                       # saydamlık maskesi: PNG olarak birleştir
                             pix = pymupdf.Pixmap(doc.extract_image(xref)["image"])
@@ -659,11 +659,112 @@ def extract_images(paths, progress, min_side: int = 48, **_):
                         except Exception:
                             skipped += 1
         if not saved:
-            progress(f"ℹ {p.name}: çıkarılacak resim yok" + (f" ({skipped} küçük süs atlandı)." if skipped else "."))
+            progress(T("ℹ {0}: çıkarılacak resim yok", p.name) + (T(" ({0} küçük süs atlandı).", skipped) if skipped else "."))
             continue
-        extra = [f"{dupes} tekrar eden kopya" if dupes else "", f"{skipped} küçük ikon/çizgi" if skipped else ""]
+        extra = [T("{0} tekrar eden kopya", dupes) if dupes else "", T("{0} küçük ikon/çizgi", skipped) if skipped else ""]
         extra = [e for e in extra if e]
-        progress(f"ℹ {p.name}: {saved} resim çıkarıldı → {folder.name}"
-                 + (f" ({', '.join(extra)} atlandı)." if extra else "."))
+        progress(T("ℹ {0}: {1} resim çıkarıldı → {2}", p.name, saved, folder.name)
+                 + (T(" ({0} atlandı).", ', '.join(extra)) if extra else "."))
         outputs.append(folder)
     return outputs
+
+
+# ============================================================ bütün sayfaları A4 yap
+
+def to_a4(paths: list[Path], progress, **_) -> list[Path]:
+    """Farklı boyutlu sayfalar (A5, Letter, telefon taraması, slayt) tek tip A4'e: içerik oranı korunarak
+    sığdırılır ve ortalanır; yatay sayfalar yatay A4 olur. Metin ve çizimler vektör kalır."""
+    from .actions import open_pdf
+    W, H = pymupdf.paper_size("a4")
+    outputs = []
+    for p in paths:
+        with open_pdf(p) as src, pymupdf.open() as out:
+            changed = 0
+            for i, page in enumerate(src):
+                if i % 20 == 0:
+                    progress(T("{0}: sayfa {1}/{2}", p.name, i + 1, len(src)))
+                r = page.rect                                    # görünen (döndürülmüş) boyut
+                land = r.width > r.height
+                pw, ph = (H, W) if land else (W, H)
+                if abs(r.width - pw) > 3 or abs(r.height - ph) > 3:
+                    changed += 1
+                dst = out.new_page(width=pw, height=ph)
+                k = min(pw / r.width, ph / r.height)
+                w, h = r.width * k, r.height * k
+                box = pymupdf.Rect((pw - w) / 2, (ph - h) / 2, (pw + w) / 2, (ph + h) / 2)
+                dst.show_pdf_page(box, src, i)
+            if not changed:
+                progress(T("ℹ {0}: bütün sayfalar zaten A4.", p.name))
+                continue
+            dst_path = unique_path(p.parent, f"{p.stem}_a4", ".pdf")
+            out.save(dst_path, garbage=3, deflate=True)
+            progress(T("ℹ {0}: {1} sayfa A4'e oturtuldu.", p.name, changed))
+            outputs.append(dst_path)
+    return outputs
+
+
+# ============================================================ boyuta göre böl
+
+def _pdf_bytes(src, pages: list[int]) -> bytes:
+    with pymupdf.open() as d:
+        for i in pages:
+            d.insert_pdf(src, from_page=i, to_page=i)
+        return d.tobytes(garbage=3, deflate=True)
+
+
+def split_by_size(paths: list[Path], progress, size: str = "10", **_) -> list[Path]:
+    """PDF'i her biri en fazla N MB olan parçalara böler (e-posta eki / yükleme sınırı). Sayfa sırası korunur."""
+    from .actions import open_pdf, unique_dir
+    from .tools import _parse_mb
+    limit = int(_parse_mb(size) * 1024 * 1024)
+    outputs = []
+    for p in paths:
+        if p.stat().st_size <= limit:
+            progress(T("ℹ {0}: zaten {1}, bölmeye gerek yok.", p.name, human_size(p.stat().st_size)))
+            continue
+        with open_pdf(p) as src:
+            n = len(src)
+            progress(T("{0}: sayfa boyutları ölçülüyor", p.name))
+            # tek tek sayfa boyutu (paylaşılan yazı tipleri her sayfada sayıldığı için fazla tahmin: güvenli)
+            est = []
+            for i in range(n):
+                if i % 10 == 0:
+                    progress(T("{0}: sayfa {1}/{2}", p.name, i + 1, n))
+                est.append(len(_pdf_bytes(src, [i])))
+            chunks, cur, cur_size = [], [], 0
+            for i, s in enumerate(est):
+                if cur and cur_size + s > limit:
+                    chunks.append(cur)
+                    cur, cur_size = [], 0
+                cur.append(i)
+                cur_size += s
+            if cur:
+                chunks.append(cur)
+            # tahmin fazla olduğundan parçalar sınırın epey altında kalabilir: komşuları gerçek boyutla birleştir
+            merged = [chunks[0]]
+            for c in chunks[1:]:
+                trial = merged[-1] + c
+                if len(_pdf_bytes(src, trial)) <= limit:
+                    merged[-1] = trial
+                else:
+                    merged.append(c)
+            if len(merged) == 1:
+                progress(T("ℹ {0}: tek sayfası bile {1} üstünde; önce sıkıştır.", p.name, human_size(limit))
+                         if n == 1 else T("ℹ {0}: bölmeye gerek kalmadı.", p.name))
+                continue
+            folder = unique_dir(p.parent, f"{p.stem}_parcalar")
+            big = 0
+            for k, pages in enumerate(merged, 1):
+                data = _pdf_bytes(src, pages)
+                big += len(data) > limit
+                out = folder / f"{localized_part(p.stem, k)}.pdf"
+                out.write_bytes(data)
+            progress(T("ℹ {0}: {1} parça → {2}", p.name, len(merged), folder.name) +
+                     (T(" ({0} parçada tek sayfa sınırı aşıyor).", big) if big else ""))
+            outputs.append(folder)
+    return outputs
+
+
+def localized_part(stem: str, k: int) -> str:
+    from .actions import localized_stem
+    return localized_stem(f"{stem}_parca{k}")

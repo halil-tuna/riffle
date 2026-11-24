@@ -21,6 +21,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from .i18n import T
 
 try:
     import pymupdf
@@ -57,7 +58,7 @@ def languages(exe: str) -> str:
     have = set((r.stdout + r.stderr).decode("utf-8", "ignore").split())
     picked = [l for l in ("tur", "eng") if l in have]
     if not picked:
-        raise OcrUnavailable("Tesseract'ta Türkçe/İngilizce dil paketi yok.")
+        raise OcrUnavailable(T("Tesseract'ta Türkçe/İngilizce dil paketi yok."))
     return "+".join(picked)
 
 
@@ -65,9 +66,9 @@ def require() -> tuple[str, str]:
     exe = find_tesseract()
     if not exe:
         raise OcrUnavailable(
-            "OCR için Tesseract gerekli (ücretsiz).\n"
+            T("OCR için Tesseract gerekli (ücretsiz).\n"
             "Windows: github.com/UB-Mannheim/tesseract/wiki → kurarken 'Turkish' dilini işaretle.\n"
-            "Linux: sudo apt install tesseract-ocr tesseract-ocr-tur")
+            "Linux: sudo apt install tesseract-ocr tesseract-ocr-tur"))
     return exe, languages(exe)
 
 
@@ -206,7 +207,7 @@ def ocr_pages(doc, pages: list[int], progress=lambda m: None) -> dict[int, list[
         for i, words in ex.map(job_isolated, pages):
             out[i] = words
             done += 1
-            progress(f"OCR: sayfa {done}/{len(pages)}")
+            progress(T("OCR: sayfa {0}/{1}", done, len(pages)))
     return out
 
 

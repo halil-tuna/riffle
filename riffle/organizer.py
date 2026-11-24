@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import APP_NAME
 from .organizer_model import Document
+from .i18n import T
 
 CELL_W, CELL_H, THUMB = 168, 214, 150
 PAD = 14
@@ -39,7 +40,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     except Exception:
         DND_FILES = None
         root = tk.Tk()
-    root.title(f"{APP_NAME} — Sayfa düzenleyici")
+    root.title(T("{0} — Sayfa düzenleyici", APP_NAME))
     root.geometry(f"{min(1180, root.winfo_screenwidth() - 60)}x{min(760, root.winfo_screenheight() - 80)}")
     root.minsize(640, 420)
     from . import theme
@@ -167,9 +168,9 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         rows = (n + cols() - 1) // cols()
         canvas.configure(scrollregion=(0, 0, canvas.winfo_width(), PAD + rows * (CELL_H + PAD) + PAD))
         parts = len(doc.groups()) if doc.pages else 0
-        status.configure(text=f"{n} sayfa · {len(sel)} seçili"
-                         + (f" · {parts} ayrı PDF olarak kaydedilecek" if parts > 1 else "")
-                         + "  ·  sürükle → sırala, sağ tık → işlemler")
+        status.configure(text=T("{0} sayfa · {1} seçili", n, len(sel))
+                         + (T(" · {0} ayrı PDF olarak kaydedilecek", parts) if parts > 1 else "")
+                         + T("  ·  sürükle → sırala, sağ tık → işlemler"))
 
     # ------------------------------------------------------------------ işlemler
     def selected():
@@ -211,16 +212,16 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         after_change(doc.move(s, max(0, to)))
 
     def add_files():
-        types = [("Desteklenen", "*.pdf *.jpg *.jpeg *.png *.webp *.bmp *.tif *.tiff *.gif *.heic *.heif "
+        types = [(T("Desteklenen"), "*.pdf *.jpg *.jpeg *.png *.webp *.bmp *.tif *.tiff *.gif *.heic *.heif "
                                  "*.doc *.docx *.odt *.rtf *.txt *.xls *.xlsx *.ods *.csv *.ppt *.pptx *.odp"),
-                 ("Tümü", "*.*")]
-        names = filedialog.askopenfilenames(parent=root, title="Dosya ekle", filetypes=types)
+                 (T("Tümü"), "*.*")]
+        names = filedialog.askopenfilenames(parent=root, title=T("Dosya ekle"), filetypes=types)
         if names:
             at = max(sel) + 1 if sel else None
             add(list(names), at)
 
     def add(paths, at=None):
-        status.configure(text="Dosyalar hazırlanıyor…")
+        status.configure(text=T("Dosyalar hazırlanıyor…"))
         root.update_idletasks()
         before = len(doc.pages)
         errors = doc.add_files(paths, at, lambda m: (status.configure(text=m), root.update_idletasks()))
@@ -244,7 +245,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             return
         folder, stem = doc.default_target()
         doc.image_mode = "a4" if img_mode.get().startswith("A4") else "original"
-        status.configure(text="Kaydediliyor…")
+        status.configure(text=T("Kaydediliyor…"))
         root.update_idletasks()
         try:
             outs = doc.save(folder, stem, lambda m: (status.configure(text=m), root.update_idletasks()))
@@ -252,10 +253,10 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             messagebox.showerror(APP_NAME, str(e), parent=root)
             return
         saved.extend(outs)
-        print("Tamamlandı:", ", ".join(o.name for o in outs))
+        print(T("Tamamlandı:"), ", ".join(o.name for o in outs))
         sys.stdout.flush()
         redraw()
-        status.configure(text=f"✔ Kaydedildi: {', '.join(o.name for o in outs)}  →  {folder}")
+        status.configure(text=T("✔ Kaydedildi: {0}  →  {1}", ', '.join(o.name for o in outs), folder))
         open_btn.configure(state="normal")
 
     def open_folder():
@@ -264,28 +265,28 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             of(saved[-1])
 
     # ------------------------------------------------------------------ araç çubuğu
-    btn("↶ Geri al", undo)
+    btn(T("↶ Geri al"), undo)
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
-    btn("＋ Dosya", add_files)
-    btn("＋ Boş", blank)
+    btn(T("＋ Dosya"), add_files)
+    btn(T("＋ Boş"), blank)
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
-    btn("⟲ Sola", lambda: rotate(270))
-    btn("⟳ Sağa", lambda: rotate(90))
-    btn("Çoğalt", duplicate)
-    btn("Sil", delete)
-    btn("✂ Böl", split)
+    btn(T("⟲ Sola"), lambda: rotate(270))
+    btn(T("⟳ Sağa"), lambda: rotate(90))
+    btn(T("Çoğalt"), duplicate)
+    btn(T("Sil"), delete)
+    btn(T("✂ Böl"), split)
     ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=5)
     btn("A→Z", lambda: (doc.sort_by_name(), after_change()))
-    btn("Ters sıra", lambda: (doc.reverse(), after_change()))
+    btn(T("Ters sıra"), lambda: (doc.reverse(), after_change()))
     # alt çubuk: durum solda; kaydetme ve ayar sağda (pencere daralsa da görünür kalır)
-    save_btn = ttk.Button(foot, text="Kaydet", command=save, style="Accent.TButton", width=12)
+    save_btn = ttk.Button(foot, text=T("Kaydet"), command=save, style="Accent.TButton", width=12)
     save_btn.pack(side="right", padx=(6, 0))
-    open_btn = ttk.Button(foot, text="Klasörü aç", command=open_folder, state="disabled", style="Tool.TButton")
+    open_btn = ttk.Button(foot, text=T("Klasörü aç"), command=open_folder, state="disabled", style="Tool.TButton")
     open_btn.pack(side="right", padx=2)
-    img_mode = tk.StringVar(value="A4 sayfaya sığdır")
+    img_mode = tk.StringVar(value=T("A4 sayfaya sığdır"))
     ttk.Combobox(foot, textvariable=img_mode, state="readonly", width=19,
-                 values=["A4 sayfaya sığdır", "Görselin kendi boyutu"]).pack(side="right", padx=4)
-    ttk.Label(foot, text="Görseller:").pack(side="right")
+                 values=[T("A4 sayfaya sığdır"), T("Görselin kendi boyutu")]).pack(side="right", padx=4)
+    ttk.Label(foot, text=T("Görseller:")).pack(side="right")
     status.pack(side="left", fill="x", expand=True)
 
     # ------------------------------------------------------------------ fare
@@ -346,16 +347,16 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         drag.update(start=None, active=False, gap=None)
 
     menu = tk.Menu(root, tearoff=0)
-    menu.add_command(label="Sağa döndür", command=lambda: rotate(90))
-    menu.add_command(label="Sola döndür", command=lambda: rotate(270))
-    menu.add_command(label="Ters çevir (180°)", command=lambda: rotate(180))
+    menu.add_command(label=T("Sağa döndür"), command=lambda: rotate(90))
+    menu.add_command(label=T("Sola döndür"), command=lambda: rotate(270))
+    menu.add_command(label=T("Ters çevir (180°)"), command=lambda: rotate(180))
     menu.add_separator()
-    menu.add_command(label="Bu sayfadan sonra böl / bölmeyi kaldır", command=split)
-    menu.add_command(label="Sonrasına boş sayfa ekle", command=blank)
-    menu.add_command(label="Sonrasına dosya ekle…", command=add_files)
+    menu.add_command(label=T("Bu sayfadan sonra böl / bölmeyi kaldır"), command=split)
+    menu.add_command(label=T("Sonrasına boş sayfa ekle"), command=blank)
+    menu.add_command(label=T("Sonrasına dosya ekle…"), command=add_files)
     menu.add_separator()
-    menu.add_command(label="Çoğalt", command=duplicate)
-    menu.add_command(label="Sil", command=delete)
+    menu.add_command(label=T("Çoğalt"), command=duplicate)
+    menu.add_command(label=T("Sil"), command=delete)
 
     def on_right(e):
         y = canvas.canvasy(e.y)
@@ -380,7 +381,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
         if i is None or not 0 <= i < len(doc.pages):
             return
         top = tk.Toplevel(root)
-        top.title(f"{APP_NAME} — Önizleme")
+        top.title(T("{0} — Önizleme", APP_NAME))
         top.transient(root)
         theme.window(top)
         side = int(min(root.winfo_screenheight() * 0.82, 1100))
@@ -396,14 +397,13 @@ def run(paths: list[Path], progress=print) -> list[Path]:
             try:
                 png = doc.thumbnail_png(pg, side)
             except Exception as e:
-                info.configure(text=f"Önizlenemedi: {e}")
+                info.configure(text=T("Önizlenemedi: {0}", e))
                 return
             cur["img"] = tk.PhotoImage(data=base64.b64encode(png))
             cv.delete("all")
             cv.create_image(cv.winfo_width() // 2 or side // 2, (cv.winfo_height() or side) // 2,
                             image=cur["img"], anchor="center")
-            info.configure(text=f"{k + 1} / {len(doc.pages)}  ·  {pg.label}   "
-                                "(←/→ gez · R/L döndür · Del sil · Esc kapat)")
+            info.configure(text=T("{0} / {1}  ·  {2}   (←/→ gez · R/L döndür · Del sil · Esc kapat)", k + 1, len(doc.pages), pg.label))
             sel.clear()
             sel.add(k)
             redraw()
@@ -441,7 +441,7 @@ def run(paths: list[Path], progress=print) -> list[Path]:
     def on_double(e):
         preview(index_at(e.x, canvas.canvasy(e.y)))
 
-    menu.insert_command(0, label="Büyük önizle", command=lambda: preview(min(sel) if sel else None))
+    menu.insert_command(0, label=T("Büyük önizle"), command=lambda: preview(min(sel) if sel else None))
     menu.insert_separator(1)
 
     # ------------------------------------------------------------------ Gezgin'den bırak

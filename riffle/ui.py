@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import APP_NAME
+from .i18n import T
 
 try:
     import tkinter as tk
@@ -22,6 +23,15 @@ try:
     HAS_TK = True
 except ImportError:
     HAS_TK = False
+
+
+def _gui() -> bool:
+    """Pencere açılabilir mi? Linux'ta ekran yoksa (SSH, sunucu) konsola düş."""
+    if not HAS_TK:
+        return False
+    if sys.platform.startswith("linux"):
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return True
 
 
 def open_folder(path: Path) -> None:
@@ -77,8 +87,8 @@ def _dialog(question: str, default: str = "", secret: bool = False, parent=None)
         result["v"] = var.get()
         root.destroy()
 
-    ttk.Button(foot, text="Tamam", style="Accent.TButton", command=ok, width=10).pack(side="right")
-    ttk.Button(foot, text="İptal", command=root.destroy, width=10).pack(side="right", padx=(0, 8))
+    ttk.Button(foot, text=T("Tamam"), style="Accent.TButton", command=ok, width=10).pack(side="right")
+    ttk.Button(foot, text=T("İptal"), command=root.destroy, width=10).pack(side="right", padx=(0, 8))
     root.bind("<Return>", ok)
     root.bind("<KP_Enter>", ok)
     root.bind("<Escape>", lambda e: root.destroy())
@@ -95,17 +105,17 @@ def _dialog(question: str, default: str = "", secret: bool = False, parent=None)
 
 
 def ask_password(confirm: bool) -> str | None:
-    if not HAS_TK:
+    if not _gui():
         import getpass
-        return getpass.getpass("Şifre: ")
-    pw = _dialog("PDF şifresi:", secret=True)
+        return getpass.getpass(T("Şifre: "))
+    pw = _dialog(T("PDF şifresi:"), secret=True)
     if pw and confirm:
-        pw2 = _dialog("Şifreyi tekrar gir:", secret=True)
+        pw2 = _dialog(T("Şifreyi tekrar gir:"), secret=True)
         if pw != pw2:
             from tkinter import messagebox
             root = tk.Tk()
             root.withdraw()
-            messagebox.showerror(APP_NAME, "Şifreler eşleşmedi.", parent=root)
+            messagebox.showerror(APP_NAME, T("Şifreler eşleşmedi."), parent=root)
             root.destroy()
             pw = None
     return pw or None
@@ -113,19 +123,19 @@ def ask_password(confirm: bool) -> str | None:
 
 def ask_folder() -> str | None:
     """Çıktı klasörü sor (ayar: her seferinde sor)."""
-    if not HAS_TK or os.environ.get("RIFFLE_ORDER") == "name":
+    if not _gui() or os.environ.get("RIFFLE_ORDER") == "name":
         return None
     from tkinter import filedialog
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
-    d = filedialog.askdirectory(parent=root, title=f"{APP_NAME} — Çıktı nereye kaydedilsin?")
+    d = filedialog.askdirectory(parent=root, title=T("{0} — Çıktı nereye kaydedilsin?", APP_NAME))
     root.destroy()
     return d or None
 
 
 def ask_text(question: str, default: str = "") -> str | None:
-    if not HAS_TK:
+    if not _gui():
         try:
             return input(f"{question} [{default}] ") or default
         except EOFError:
@@ -144,13 +154,13 @@ def _describe(p: Path) -> str:
         try:
             from .actions import pymupdf
             with pymupdf.open(p) as d:
-                info = f"{len(d)} sayfa · {info}" if not d.needs_pass else f"şifreli · {info}"
+                info = T("{0} sayfa · {1}", len(d), info) if not d.needs_pass else T("şifreli · {0}", info)
         except Exception:
             pass
     return info
 
 
-def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam", allow_pages: bool = True):
+def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = None, allow_pages: bool = True):
     """Dosya sırasını seçtiren küçük pencere (sayfa açmaz, anında gelir).
 
     Döndürür: ("ok", sıralı liste) · ("organize", sıralı liste) = sayfa düzenleyicide aç · İptal: None
@@ -160,9 +170,10 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam", 
     preset = os.environ.get("RIFFLE_ORDER")          # otomatik testler: "name" = Tamam, "organize" = düzenleyici
     if preset == "organize":
         return ("organize", list(paths))
-    if not HAS_TK or preset == "name":
+    if not _gui() or preset == "name":
         return ("ok", list(paths))       # pencere yok: ad sırası
     items = list(paths)
+    ok_text = ok_text or T("Tamam")
     result: dict = {"value": None}
     from . import theme
 
@@ -175,7 +186,7 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam", 
     frm = ttk.Frame(root, padding=(18, 16, 18, 14))
     frm.pack(fill="both", expand=True)
     ttk.Label(frm, text=hint, style="Strong.TLabel").pack(anchor="w")
-    ttk.Label(frm, text="Sürükleyerek ya da düğmelerle sırala · Ctrl+↑/↓ taşır · Del listeden çıkarır",
+    ttk.Label(frm, text=T("Sürükleyerek ya da düğmelerle sırala · Ctrl+↑/↓ taşır · Del listeden çıkarır"),
               style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
     mid = ttk.Frame(frm)
     mid.pack(fill="both", expand=True)
@@ -183,8 +194,8 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam", 
     style.configure("Order.Treeview", rowheight=34)
     tree = ttk.Treeview(mid, columns=("no", "name", "info"), show="headings", selectmode="browse",
                         style="Order.Treeview", height=min(max(len(items), 4), 12))
-    for col, text, w, anchor, stretch in (("no", "#", 44, "center", False), ("name", "Dosya", 280, "w", True),
-                                          ("info", "Bilgi", 160, "w", False)):
+    for col, text, w, anchor, stretch in (("no", "#", 44, "center", False), ("name", T("Dosya"), 280, "w", True),
+                                          ("info", T("Bilgi"), 160, "w", False)):
         tree.heading(col, text=text, anchor=anchor)
         tree.column(col, width=w, anchor=anchor, stretch=stretch)
     tree.tag_configure("muted", foreground=pal.muted)
@@ -264,25 +275,25 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str = "Tamam", 
     def b(text, cmd):
         ttk.Button(side, text=text, command=cmd, width=14).pack(fill="x", pady=2)
 
-    b("↑  Yukarı", lambda: move(-1))
-    b("↓  Aşağı", lambda: move(1))
+    b(T("↑  Yukarı"), lambda: move(-1))
+    b(T("↓  Aşağı"), lambda: move(1))
     ttk.Separator(side).pack(fill="x", pady=8)
     b("A → Z", lambda: by_name())
     b("Z → A", lambda: by_name(True))
-    b("Eskiden yeniye", lambda: sort(lambda p: p.stat().st_mtime))
-    b("Ters çevir", lambda: (items.reverse(), refresh(0)))
+    b(T("Eskiden yeniye"), lambda: sort(lambda p: p.stat().st_mtime))
+    b(T("Ters çevir"), lambda: (items.reverse(), refresh(0)))
     ttk.Separator(side).pack(fill="x", pady=8)
-    b("Listeden çıkar", remove)
+    b(T("Listeden çıkar"), remove)
 
     foot = ttk.Frame(frm, padding=(0, 14, 0, 0))
     foot.pack(fill="x")
     if allow_pages:
-        ttk.Button(foot, text="Sayfa sayfa düzenle…",
+        ttk.Button(foot, text=T("Sayfa sayfa düzenle…"),
                    command=lambda: done(("organize", list(items)))).pack(side="left")
     ok_btn = ttk.Button(foot, text=ok_text, style="Accent.TButton", width=12,
                         command=lambda: done(("ok", list(items))))
     ok_btn.pack(side="right")
-    ttk.Button(foot, text="İptal", width=10, command=lambda: done(None)).pack(side="right", padx=8)
+    ttk.Button(foot, text=T("İptal"), width=10, command=lambda: done(None)).pack(side="right", padx=8)
 
     def key(seq, fn):
         root.bind(seq, lambda e: (fn(), "break")[1])
@@ -309,7 +320,7 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
                     cancel: threading.Event | None = None) -> None:
     """job(progress) -> (çıktılar, hatalar). Pencerede ilerleme gösterir; cancel verilirse İptal düğmesi."""
     clip_prefix = "\x00clip:"
-    if not HAS_TK:
+    if not _gui():
         def cli_progress(m):
             if m.startswith(clip_prefix):
                 print(m[len(clip_prefix):])         # panonun yerine: metni ekrana yaz
@@ -317,9 +328,9 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
                 print("·", m)
         outputs, errors = job(cli_progress)
         if errors:
-            notify("Hata", "\n".join(errors))
+            notify(T("Hata"), "\n".join(errors))
         if outputs:
-            notify("Tamamlandı", ", ".join(p.name for p in outputs))
+            notify(T("Tamamlandı"), ", ".join(p.name for p in outputs))
         return
 
     q: queue.Queue = queue.Queue()
@@ -345,10 +356,10 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
         pass
     titles = ttk.Frame(head)
     titles.pack(side="left", fill="x", expand=True)
-    headline = ttk.Label(titles, text="Çalışıyor…", style="Muted.TLabel")
+    headline = ttk.Label(titles, text=T("Çalışıyor…"), style="Muted.TLabel")
     headline.pack(anchor="w")
     ttk.Label(titles, text=title, style="Strong.TLabel", wraplength=400, justify="left").pack(anchor="w")
-    status = ttk.Label(frame, text="Başlıyor…", style="Muted.TLabel", width=60, wraplength=460, justify="left")
+    status = ttk.Label(frame, text=T("Başlıyor…"), style="Muted.TLabel", width=60, wraplength=460, justify="left")
     status.pack(anchor="w", pady=(14, 10))
     bar = ttk.Progressbar(frame, mode="indeterminate", length=460)
     bar.pack(fill="x")
@@ -362,12 +373,12 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
     def do_cancel():
         if cancel is not None and running["on"]:
             cancel.set()
-            status.configure(text="İptal ediliyor… (bitmiş dosyalar kalır)")
+            status.configure(text=T("İptal ediliyor… (bitmiş dosyalar kalır)"))
             if cancel_btn is not None:
                 cancel_btn.configure(state="disabled")
 
     if cancel is not None:
-        cancel_btn = ttk.Button(buttons, text="İptal", command=do_cancel, width=10)
+        cancel_btn = ttk.Button(buttons, text=T("İptal"), command=do_cancel, width=10)
         cancel_btn.pack(side="right")
         root.bind("<Escape>", lambda e: do_cancel())
 
@@ -383,15 +394,15 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
         try:
             result = job(lambda m: q.put(("msg", m)))
         except Exception as e:  # beklenmeyen hata
-            result = ([], [f"Beklenmeyen hata: {e}"])
+            result = ([], [T("Beklenmeyen hata: {0}", e)])
         q.put(("done", result))
 
     def finish(outputs: list[Path], errors: list[str]):
         # konsola da yaz (komut satırından çalıştırma ve kayıt için)
         if outputs:
-            print("Tamamlandı:", ", ".join(p.name for p in outputs))
+            print(T("Tamamlandı:"), ", ".join(p.name for p in outputs))
         for e in errors:
-            print("Hata:", e)
+            print(T("Hata:"), e)
         sys.stdout.flush()
         running["on"] = False
         if cancel_btn is not None:
@@ -401,26 +412,26 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
         bar.stop()
         bar.pack_forget()
         status.pack_forget()
-        cancelled = any("İptal edildi" in e for e in errors)
+        cancelled = any(T("İptal edildi") in e for e in errors)
         if errors and not outputs:
-            headline.configure(text="✕  İptal edildi" if cancelled else "✕  Olmadı", style="Danger.TLabel")
+            headline.configure(text=T("✕  İptal edildi") if cancelled else T("✕  Olmadı"), style="Danger.TLabel")
         elif errors:
-            headline.configure(text="!  Kısmen tamamlandı", style="Danger.TLabel")
+            headline.configure(text=T("!  Kısmen tamamlandı"), style="Danger.TLabel")
         elif outputs:
-            headline.configure(text="✓  Tamamlandı", style="Success.TLabel")
+            headline.configure(text=T("✓  Tamamlandı"), style="Success.TLabel")
         else:
-            headline.configure(text="Hiçbir şey yapılmadı", style="Muted.TLabel")
+            headline.configure(text=T("Hiçbir şey yapılmadı"), style="Muted.TLabel")
         result_box.pack(fill="x", pady=(14, 0))
         for p in outputs[:8]:
             ttk.Label(result_box, text=f"•  {p.name}", wraplength=460).pack(anchor="w", pady=1)
         if len(outputs) > 8:
-            ttk.Label(result_box, text=f"… ve {len(outputs) - 8} dosya daha", style="Muted.TLabel").pack(anchor="w")
+            ttk.Label(result_box, text=T("… ve {0} dosya daha", len(outputs) - 8), style="Muted.TLabel").pack(anchor="w")
         if clip["text"]:
             try:
                 root.clipboard_clear()
                 root.clipboard_append(clip["text"])
                 root.update()
-                notes.insert(0, "Metin panoya kopyalandı: istediğin yere Ctrl+V ile yapıştır.")
+                notes.insert(0, T("Metin panoya kopyalandı: istediğin yere Ctrl+V ile yapıştır."))
             except tk.TclError:
                 pass
         if notes:
@@ -431,16 +442,16 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
                       justify="left").pack(anchor="w", pady=(6, 0))
         if newer["v"]:
             from . import update
-            link = ttk.Label(result_box, text=f"↑  Yeni sürüm var: Riffle {newer['v']} — indirmek için tıkla",
+            link = ttk.Label(result_box, text=T("↑  Yeni sürüm var: Riffle {0} — indirmek için tıkla", newer['v']),
                              foreground=pal.accent, cursor="hand2")
             link.pack(anchor="w", pady=(10, 0))
             link.bind("<Button-1>", lambda e: update.open_download())
         if outputs:
-            ttk.Button(buttons, text="Klasörü aç", style="Accent.TButton",
+            ttk.Button(buttons, text=T("Klasörü aç"), style="Accent.TButton",
                        command=lambda: (open_folder(outputs[0]), root.destroy())).pack(side="right")
-            ttk.Button(buttons, text="Kapat", command=root.destroy, width=10).pack(side="right", padx=(0, 8))
+            ttk.Button(buttons, text=T("Kapat"), command=root.destroy, width=10).pack(side="right", padx=(0, 8))
         else:
-            ttk.Button(buttons, text="Kapat", command=root.destroy, width=10).pack(side="right")
+            ttk.Button(buttons, text=T("Kapat"), command=root.destroy, width=10).pack(side="right")
         root.attributes("-topmost", False)
         if outputs and not errors:
             root.after(15000, root.destroy)  # başarıdaysa 15 sn sonra kendiliğinden kapan

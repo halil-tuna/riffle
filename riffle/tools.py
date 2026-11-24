@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 from .actions import ConversionError, fix_tounicode, open_pdf, pymupdf, unique_path
+from .i18n import T
 
 # ============================================================ yardımcılar
 
@@ -18,7 +19,7 @@ def parse_pages(spec: str, n: int) -> list[int]:
     """'1-3, 5, 8-' / 'son' / 'tek' / 'çift' → 0 tabanlı sayfa indeksleri (sıralı, tekrarsız)."""
     spec = (spec or "").strip().lower().replace(" ", "")
     if not spec:
-        raise ConversionError("Sayfa aralığı boş.")
+        raise ConversionError(T("Sayfa aralığı boş."))
     out: list[int] = []
     for part in spec.replace(";", ",").split(","):
         if not part:
@@ -32,16 +33,16 @@ def parse_pages(spec: str, n: int) -> list[int]:
         if part in ("çift", "cift", "even"):
             out += list(range(1, n, 2))
             continue
-        m = re.fullmatch(r"(\d*)-(\d*|son)", part)
+        m = re.fullmatch(r"(\d*)-(\d*|son|last)", part)
         if m:
             a = int(m.group(1)) if m.group(1) else 1
-            b = n if m.group(2) in ("", "son") else int(m.group(2))
+            b = n if m.group(2) in ("", "son", "last") else int(m.group(2))
         elif part.isdigit():
             a = b = int(part)
         else:
-            raise ConversionError(f"Anlaşılmayan sayfa ifadesi: '{part}' (örnek: 1-3,5,8-)")
+            raise ConversionError(T("Anlaşılmayan sayfa ifadesi: '{0}' (örnek: 1-3,5,8-)", part))
         if a < 1 or b > n or a > b:
-            raise ConversionError(f"Sayfa aralığı {part} geçersiz (belge {n} sayfa).")
+            raise ConversionError(T("Sayfa aralığı {0} geçersiz (belge {1} sayfa).", part, n))
         out += list(range(a - 1, b))
     return sorted(set(out))
 
@@ -64,7 +65,7 @@ def extract_pages(paths, progress, pages: str = "", **_):
     for p in paths:
         with open_pdf(p) as src:
             idx = parse_pages(pages, len(src))
-            progress(f"{p.name}: {len(idx)} sayfa çıkarılıyor")
+            progress(T("{0}: {1} sayfa çıkarılıyor", p.name, len(idx)))
             out_doc = pymupdf.open()
             for i in idx:
                 out_doc.insert_pdf(src, from_page=i, to_page=i)
@@ -81,8 +82,8 @@ def delete_pages(paths, progress, pages: str = "", **_):
         with open_pdf(p) as doc:
             idx = parse_pages(pages, len(doc))
             if len(idx) >= len(doc):
-                raise ConversionError(f"{p.name}: tüm sayfalar silinemez.")
-            progress(f"{p.name}: {len(idx)} sayfa siliniyor")
+                raise ConversionError(T("{0}: tüm sayfalar silinemez.", p.name))
+            progress(T("{0}: {1} sayfa siliniyor", p.name, len(idx)))
             doc.delete_pages(idx)
             out = unique_path(p.parent, f"{p.stem}_sayfa_silindi", ".pdf")
             doc.save(out, garbage=3, deflate=True)
@@ -93,7 +94,7 @@ def delete_pages(paths, progress, pages: str = "", **_):
 def reverse_pages(paths, progress, **_):
     outputs = []
     for p in paths:
-        progress(f"Sayfa sırası ters çevriliyor: {p.name}")
+        progress(T("Sayfa sırası ters çevriliyor: {0}", p.name))
         with open_pdf(p) as doc:
             doc.select(list(range(len(doc) - 1, -1, -1)))
             out = unique_path(p.parent, f"{p.stem}_ters", ".pdf")
@@ -105,17 +106,17 @@ def reverse_pages(paths, progress, **_):
 def repair_pdf(paths, progress, **_):
     outputs = []
     for p in paths:
-        progress(f"Onarılıyor: {p.name}")
+        progress(T("Onarılıyor: {0}", p.name))
         try:
             doc = pymupdf.open(p)
         except Exception as e:
-            raise ConversionError(f"{p.name} açılamayacak kadar bozuk: {e}")
+            raise ConversionError(T("{0} açılamayacak kadar bozuk: {1}", p.name, e))
         out = unique_path(p.parent, f"{p.stem}_onarilmis", ".pdf")
         try:
             repaired = getattr(doc, "is_repaired", False)
             try:
                 doc.save(out, garbage=4, deflate=True, clean=True)
-                note = "yapısal hatalar onarıldı." if repaired else "hata bulunmadı, yeniden düzenlendi."
+                note = T("yapısal hatalar onarıldı.") if repaired else T("hata bulunmadı, yeniden düzenlendi.")
             except Exception:
                 # Kademeli kurtarma: sayfaları tek tek kopyala; kopyalanamayanın görüntüsünü al
                 out.unlink(missing_ok=True)
@@ -136,11 +137,11 @@ def repair_pdf(paths, progress, **_):
                     except Exception:
                         lost += 1
                 if not len(new):
-                    raise ConversionError(f"{p.name}: kurtarılabilen sayfa yok.")
+                    raise ConversionError(T("{0}: kurtarılabilen sayfa yok.", p.name))
                 new.save(out, garbage=4, deflate=True)
                 new.close()
-                note = f"{copied} sayfa kurtarıldı" + (f", {imaged} sayfa görüntü olarak" if imaged else "") + \
-                       (f", {lost} sayfa kurtarılamadı" if lost else "") + "."
+                note = T("{0} sayfa kurtarıldı", copied) + (T(", {0} sayfa görüntü olarak", imaged) if imaged else "") + \
+                       (T(", {0} sayfa kurtarılamadı", lost) if lost else "") + "."
         finally:
             doc.close()
         progress(f"ℹ {p.name}: {note}")
@@ -155,7 +156,7 @@ def add_page_numbers(paths, progress, fmt: str = "{n} / {total}", **_):
     ffile = _font_file()
     outputs = []
     for p in paths:
-        progress(f"Sayfa numarası ekleniyor: {p.name}")
+        progress(T("Sayfa numarası ekleniyor: {0}", p.name))
         with open_pdf(p) as doc:
             total = len(doc)
             for i, page in enumerate(doc):
@@ -180,11 +181,11 @@ def add_page_numbers(paths, progress, fmt: str = "{n} / {total}", **_):
 def add_watermark(paths, progress, text: str = "", **_):
     text = (text or "").strip()
     if not text:
-        raise ConversionError("Filigran metni boş.")
+        raise ConversionError(T("Filigran metni boş."))
     ffile = _font_file()
     outputs = []
     for p in paths:
-        progress(f"Filigran ekleniyor: {p.name}")
+        progress(T("Filigran ekleniyor: {0}", p.name))
         with open_pdf(p) as doc:
             for page in doc:
                 W, H = page.rect.width, page.rect.height
@@ -223,7 +224,7 @@ def make_searchable(paths, progress, **_):
         with open_pdf(p) as doc:
             pages = [i for i, pg in enumerate(doc) if ocr.needs_ocr(pg)]
             if not pages:
-                progress(f"ℹ {p.name}: zaten metin içeriyor, OCR gerekmedi.")
+                progress(T("ℹ {0}: zaten metin içeriyor, OCR gerekmedi.", p.name))
                 continue
             try:
                 words = ocr.ocr_pages(doc, pages, progress)
@@ -233,10 +234,9 @@ def make_searchable(paths, progress, **_):
             n = ocr.make_searchable(doc, words, report=rep)
             out = unique_path(p.parent, f"{p.stem}_ocr", ".pdf")
             doc.save(out, garbage=3, deflate=True)
-        progress(f"ℹ {p.name}: {len(pages)} sayfada {n} kelime tanındı, metin seçilebilir ve aranabilir.")
+        progress(T("ℹ {0}: {1} sayfada {2} kelime tanındı, metin seçilebilir ve aranabilir.", p.name, len(pages), n))
         if rep.get("handwritten"):
-            progress(f"ℹ {rep['handwritten']} sayfa el yazısı gibi görünüyor: Tesseract el yazısını güvenilir "
-                     f"okuyamaz, yalnızca emin olduğu kelimeler eklendi ({rep['dropped']} şüpheli kelime atlandı).")
+            progress(T("ℹ {0} sayfa el yazısı gibi görünüyor: Tesseract el yazısını güvenilir okuyamaz, yalnızca emin olduğu kelimeler eklendi ({1} şüpheli kelime atlandı).", rep['handwritten'], rep['dropped']))
         outputs.append(out)
     return outputs
 
@@ -250,7 +250,7 @@ def pdf_to_excel(paths, progress, **_):
         from openpyxl.styles import Font
         from openpyxl.utils import get_column_letter
     except ImportError:
-        raise ConversionError("openpyxl kurulu değil: pip install openpyxl")
+        raise ConversionError(T("openpyxl kurulu değil: pip install openpyxl"))
     outputs = []
     for p in paths:
         with open_pdf(p) as doc:
@@ -259,7 +259,7 @@ def pdf_to_excel(paths, progress, **_):
             count = 0
             for strategy in ("lines", "text"):
                 for i, page in enumerate(doc):
-                    progress(f"{p.name}: sayfa {i + 1}/{len(doc)} tablolar aranıyor")
+                    progress(T("{0}: sayfa {1}/{2} tablolar aranıyor", p.name, i + 1, len(doc)))
                     try:
                         tabs = page.find_tables(strategy=strategy)
                     except Exception:
@@ -286,12 +286,12 @@ def pdf_to_excel(paths, progress, **_):
                             ws.column_dimensions[get_column_letter(col)].width = min(60, max(8, width + 2))
                 if count:
                     break
-                progress(f"ℹ {p.name}: çizgili tablo yok, metin hizasına göre aranıyor.")
+                progress(T("ℹ {0}: çizgili tablo yok, metin hizasına göre aranıyor.", p.name))
             if not count:
-                raise ConversionError(f"{p.name}: tablo bulunamadı.")
+                raise ConversionError(T("{0}: tablo bulunamadı.", p.name))
             out = unique_path(p.parent, p.stem, ".xlsx")
             wb.save(out)
-        progress(f"ℹ {p.name}: {count} tablo Excel'e aktarıldı (her tablo ayrı sayfa).")
+        progress(T("ℹ {0}: {1} tablo Excel'e aktarıldı (her tablo ayrı sayfa).", p.name, count))
         outputs.append(out)
     return outputs
 
@@ -320,7 +320,7 @@ def pdf_to_word_exact(paths, progress, **_):
     from . import fixed_layout
     outputs = []
     for p in paths:
-        progress(f"Word'e (birebir düzen) çevriliyor: {p.name}")
+        progress(T("Word'e (birebir düzen) çevriliyor: {0}", p.name))
         out = unique_path(p.parent, p.stem, ".docx")
         with open_pdf(p):
             pass  # şifre/bozukluk kontrolü
@@ -335,7 +335,7 @@ def pdf_to_pptx(paths, progress, **_):
         from pptx.dml.color import RGBColor
         from pptx.util import Emu, Pt
     except ImportError:
-        raise ConversionError("python-pptx kurulu değil: pip install python-pptx")
+        raise ConversionError(T("python-pptx kurulu değil: pip install python-pptx"))
     import io
     from . import fixed_layout as fl
     outputs = []
@@ -346,7 +346,7 @@ def pdf_to_pptx(paths, progress, **_):
             prs.slide_width, prs.slide_height = Emu(round(W * 12700)), Emu(round(H * 12700))
             blank = prs.slide_layouts[6]
             for pno, page in enumerate(doc):
-                progress(f"{p.name}: slayt {pno + 1}/{len(doc)}")
+                progress(T("{0}: slayt {1}/{2}", p.name, pno + 1, len(doc)))
                 sx, sy = W / page.rect.width, H / page.rect.height
                 blocks = fl._lines(page)
                 slide = prs.slides.add_slide(blank)
@@ -389,7 +389,7 @@ def _open_image(path: Path):
         pillow_heif.register_heif_opener()
     except ImportError:
         if path.suffix.lower() in (".heic", ".heif"):
-            raise ConversionError("HEIC için pillow-heif gerekli: pip install pillow-heif")
+            raise ConversionError(T("HEIC için pillow-heif gerekli: pip install pillow-heif"))
     from PIL import ImageOps
     im = Image.open(path)
     im = ImageOps.exif_transpose(im)  # telefon fotoğraflarının yönü
@@ -404,7 +404,7 @@ def _open_image(path: Path):
 def images_to_jpg(paths, progress, **_):
     outputs = []
     for p in paths:
-        progress(f"JPG'ye çevriliyor: {p.name}")
+        progress(T("JPG'ye çevriliyor: {0}", p.name))
         im = _open_image(p)
         out = unique_path(p.parent, p.stem, ".jpg")
         im.save(out, "JPEG", quality=90, optimize=True)
@@ -415,7 +415,7 @@ def images_to_jpg(paths, progress, **_):
 def shrink_images(paths, progress, max_side: int = 1920, **_):
     outputs = []
     for p in paths:
-        progress(f"Küçültülüyor: {p.name}")
+        progress(T("Küçültülüyor: {0}", p.name))
         im = _open_image(p)
         before = p.stat().st_size
         im.thumbnail((max_side, max_side))
@@ -423,7 +423,7 @@ def shrink_images(paths, progress, max_side: int = 1920, **_):
         im.save(out, "JPEG", quality=80, optimize=True)
         after = out.stat().st_size
         from .actions import human_size
-        progress(f"ℹ {p.name}: {human_size(before)} → {human_size(after)}, en fazla {max_side} px")
+        progress(T("ℹ {0}: {1} → {2}, en fazla {3} px", p.name, human_size(before), human_size(after), max_side))
         outputs.append(out)
     return outputs
 
@@ -441,12 +441,12 @@ def merge_files(paths, progress, ordered: bool = False, image_mode: str = "a4", 
     doc.image_mode = image_mode
     errors = doc.add_files(paths, progress=progress)
     if not doc.pages:
-        raise ConversionError("\n".join(errors) or "Birleştirilecek sayfa yok.")
+        raise ConversionError("\n".join(errors) or T("Birleştirilecek sayfa yok."))
     folder, stem = doc.default_target()
     outs = doc.save(folder, stem, progress)
     for e in errors:
-        progress(f"ℹ atlandı → {e}")
-    progress(f"ℹ {len(paths) - len(errors)} dosya, {len(doc.pages)} sayfa birleştirildi; her dosya bir yer imi.")
+        progress(T("ℹ atlandı → {0}", e))
+    progress(T("ℹ {0} dosya, {1} sayfa birleştirildi; her dosya bir yer imi.", len(paths) - len(errors), len(doc.pages)))
     return outs
 
 
@@ -454,7 +454,7 @@ def organize(paths, progress, **_):
     try:
         import tkinter  # noqa: F401
     except ImportError:
-        raise ConversionError("Sayfa düzenleyici pencere gerektirir (Linux: sudo apt install python3-tk).")
+        raise ConversionError(T("Sayfa düzenleyici pencere gerektirir (Linux: sudo apt install python3-tk)."))
     from .organizer import run
     return run(list(paths), progress)
 
@@ -469,11 +469,11 @@ _TARGET_STEPS = [(400, 300, 88), (300, 220, 85), (220, 180, 82), (170, 150, 78),
 def _parse_mb(text: str) -> float:
     m = re.fullmatch(r"\s*(\d+(?:[.,]\d+)?)\s*(mb|m|kb|k)?\s*", (text or "").lower())
     if not m:
-        raise ConversionError(f"Anlaşılmayan boyut: '{text}' (örnek: 2, 1.5, 500kb)")
+        raise ConversionError(T("Anlaşılmayan boyut: '{0}' (örnek: 2, 1.5, 500kb)", text))
     v = float(m.group(1).replace(",", "."))
     mb = v / 1024 if (m.group(2) or "").startswith("k") else v
     if mb <= 0.02:
-        raise ConversionError("Hedef boyut çok küçük.")
+        raise ConversionError(T("Hedef boyut çok küçük."))
     return mb
 
 
@@ -525,7 +525,7 @@ def compress_to_target(paths, progress, target: str = "2", **_):
         out = unique_path(p.parent, f"{p.stem}_{_size_tag(str(target))}_alti", ".pdf")
         if size <= limit:
             shutil.copy2(p, out)
-            progress(f"ℹ {p.name}: zaten {human_size(size)}, {label} altında; aynen kopyalandı.")
+            progress(T("ℹ {0}: zaten {1}, {2} altında; aynen kopyalandı.", p.name, human_size(size), label))
             outputs.append(out)
             continue
         with tempfile.TemporaryDirectory(prefix="riffle_hedef_") as tmp:
@@ -536,7 +536,7 @@ def compress_to_target(paths, progress, target: str = "2", **_):
             while lo <= hi:
                 mid = (lo + hi) // 2
                 cand = Path(tmp) / f"s{mid}.pdf"
-                progress(f"{p.name}: deneniyor (kalite {_TARGET_STEPS[mid][2]}, {_TARGET_STEPS[mid][1]} dpi)")
+                progress(T("{0}: deneniyor (kalite {1}, {2} dpi)", p.name, _TARGET_STEPS[mid][2], _TARGET_STEPS[mid][1]))
                 tried[mid] = _try_compress(p, cand, _TARGET_STEPS[mid])
                 if tried[mid] <= limit:
                     best, hi = cand, mid - 1
@@ -547,17 +547,16 @@ def compress_to_target(paths, progress, target: str = "2", **_):
                 # Son çare: sayfaları görüntüye çevir (metin seçilemez olur)
                 for dpi, q in ((110, 55), (90, 45), (72, 35)):
                     cand = Path(tmp) / f"r{dpi}.pdf"
-                    progress(f"{p.name}: sayfalar görüntüye çevriliyor ({dpi} dpi)")
+                    progress(T("{0}: sayfalar görüntüye çevriliyor ({1} dpi)", p.name, dpi))
                     if _rasterize(p, cand, dpi, q) <= limit:
                         best = cand
-                        note = " Sayfalar görüntüye çevrildi: metin artık seçilemez."
+                        note = T(" Sayfalar görüntüye çevrildi: metin artık seçilemez.")
                         break
             if best is None:
                 smallest = min(tried.values())
-                raise ConversionError(f"{p.name}: {label} altına inmedi (en küçük {human_size(smallest)}). "
-                                      "Sayfa sayısı çok fazla olabilir; önce böl.")
+                raise ConversionError(T("{0}: {1} altına inmedi (en küçük {2}). Sayfa sayısı çok fazla olabilir; önce böl.", p.name, label, human_size(smallest)))
             shutil.copy2(best, out)
-        progress(f"ℹ {p.name}: {human_size(size)} → {human_size(out.stat().st_size)} (hedef {label}).{note}")
+        progress(T("ℹ {0}: {1} → {2} (hedef {3}).{4}", p.name, human_size(size), human_size(out.stat().st_size), label, note))
         outputs.append(out)
     return outputs
 
@@ -574,12 +573,12 @@ def photos_to_document(paths, progress, ordered: bool = False, **_):
     info = photos_to_pdf(paths, out, progress)
     notes = []
     if info["corners"] < info["pages"]:
-        notes.append(f"{info['pages'] - info['corners']} fotoğrafta kâğıt kenarı bulunamadı, olduğu gibi temizlendi")
+        notes.append(T("{0} fotoğrafta kâğıt kenarı bulunamadı, olduğu gibi temizlendi", info['pages'] - info['corners']))
     if info["words"] == -1:
-        notes.append("Tesseract yok: metin seçilemez (OCR için README'ye bak)")
+        notes.append(T("Tesseract yok: metin seçilemez (OCR için README'ye bak)"))
     elif info["words"]:
-        notes.append(f"{info['words']} kelime tanındı, metin aranabilir")
-    progress(f"ℹ {out.name}: {info['pages']} sayfa" + (" · " + " · ".join(notes) if notes else ""))
+        notes.append(T("{0} kelime tanındı, metin aranabilir", info['words']))
+    progress(T("ℹ {0}: {1} sayfa", out.name, info['pages']) + (" · " + " · ".join(notes) if notes else ""))
     return [out]
 
 
@@ -603,7 +602,7 @@ def folder_to_pdf(paths, progress, **_):
     for folder in paths:
         folder = Path(folder)
         if not folder.is_dir():
-            raise ConversionError(f"{folder.name} bir klasör değil.")
+            raise ConversionError(T("{0} bir klasör değil.", folder.name))
         out_doc, toc, notes = pymupdf.open(), [], []
         counts = {"pdf": 0, "görsel": 0, "office": 0}
         with tempfile.TemporaryDirectory(prefix="riffle_klasor_") as tmp:
@@ -635,12 +634,12 @@ def folder_to_pdf(paths, progress, **_):
                     rel = e.relative_to(folder)
                     try:
                         if ext in PDF:
-                            progress(f"Ekleniyor: {rel}")
+                            progress(T("Ekleniyor: {0}", rel))
                             with open_pdf(e) as src:
                                 append_with_bookmark(out_doc, src, e.stem, level, toc)
                             counts["pdf"] += 1
                         elif ext in IMAGES:
-                            progress(f"Ekleniyor: {rel}")
+                            progress(T("Ekleniyor: {0}", rel))
                             from .organizer_model import Document
                             doc = Document()
                             doc.add_files([e])
@@ -651,8 +650,8 @@ def folder_to_pdf(paths, progress, **_):
                         elif ext in OFFICE:
                             pdf = office_pdf.get(e)
                             if pdf is None:
-                                raise ConversionError(office_err or f"{e.name} çevrilemedi")
-                            progress(f"Ekleniyor: {rel}")
+                                raise ConversionError(office_err or T("{0} çevrilemedi", e.name))
+                            progress(T("Ekleniyor: {0}", rel))
                             with pymupdf.open(pdf) as src:
                                 append_with_bookmark(out_doc, src, e.stem, level, toc)
                             counts["office"] += 1
@@ -661,13 +660,13 @@ def folder_to_pdf(paths, progress, **_):
 
             walk(folder, 1)
             if not len(out_doc):
-                raise ConversionError(f"{folder.name}: birleştirilecek PDF, görsel ya da Office dosyası yok.")
+                raise ConversionError(T("{0}: birleştirilecek PDF, görsel ya da Office dosyası yok.", folder.name))
             out = unique_path(folder.parent, folder.name, ".pdf")
             save_with_toc(out_doc, toc, out)
             out_doc.close()
         summary = ", ".join(f"{v} {k}" for k, v in counts.items() if v)
-        progress(f"ℹ {out.name}: {summary}; her dosya bir yer imi.")
+        progress(T("ℹ {0}: {1}; her dosya bir yer imi.", out.name, summary))
         for n in notes:
-            progress(f"ℹ atlandı → {n}")
+            progress(T("ℹ atlandı → {0}", n))
         outputs.append(out)
     return outputs

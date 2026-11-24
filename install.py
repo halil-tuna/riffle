@@ -21,6 +21,7 @@ RUN = ROOT / "run.pyw"
 sys.path.insert(0, str(ROOT))
 
 from riffle import APP_NAME  # noqa: E402
+from riffle.i18n import T  # noqa: E402
 from riffle.actions import ACTIONS, FOLDER, all_extensions, actions_for_extension  # noqa: E402
 
 IS_WIN = sys.platform == "win32"
@@ -46,20 +47,20 @@ def venv_python(gui: bool = False) -> Path:
 
 def setup_venv() -> None:
     if not venv_python().exists():
-        print("» Sanal ortam oluşturuluyor (.venv)…")
+        print(T("» Sanal ortam oluşturuluyor (.venv)…"))
         args = [sys.executable, "-m", "venv", str(VENV)]
         if not IS_WIN:
             args.insert(3, "--system-site-packages")  # apt'den gelen tkinter görünsün
         subprocess.check_call(args)
-    print("» Kütüphaneler kuruluyor (ilk seferde 1-2 dk)…")
+    print(T("» Kütüphaneler kuruluyor (ilk seferde 1-2 dk)…"))
     py = str(venv_python())
     subprocess.check_call([py, "-m", "pip", "install", "-q", "--upgrade", "pip"])
     subprocess.check_call([py, "-m", "pip", "install", "-q", "-r", str(ROOT / "requirements.txt")])
     r = subprocess.run([py, "-c", "import tkinter"], capture_output=True)
     if r.returncode != 0:
-        print("  ! tkinter yok → pencere yerine bildirim kullanılacak.")
+        print(T("  ! tkinter yok → pencere yerine bildirim kullanılacak."))
         if not IS_WIN:
-            print("    Pencere için: sudo apt install python3-tk  (sonra kurulumu tekrar çalıştır)")
+            print(T("    Pencere için: sudo apt install python3-tk  (sonra kurulumu tekrar çalıştır)"))
 
 
 # --------------------------------------------------------------------------
@@ -137,7 +138,7 @@ def _menu_prefs() -> tuple[set, list]:
 
 def _win_item(winreg, HK, key: str, action, prefix, arg: str = "%1") -> None:
     with winreg.CreateKey(HK, key) as k:
-        winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, action.label)
+        winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, T(action.label))
         # 15'ten fazla dosya seçilince de menü görünsün
         winreg.SetValueEx(k, "MultiSelectModel", 0, winreg.REG_SZ, "Player")
         if action.id == "settings":                     # "Ayarlar…" öncesine ayırıcı çizgi
@@ -218,7 +219,7 @@ def win_cascades(ext: str) -> list:
 
 def _cascade(groups: list) -> tuple:
     """Tek grup → düz menü ('Riffle · Dönüştür'); birden çok grup → iç içe."""
-    title = f"{APP_NAME} · " + ", ".join(g for g, _ in groups)
+    title = f"{APP_NAME} · " + ", ".join(T(g) for g, _ in groups)
     if len(groups) == 1:
         return title, [(None, groups[0][1])]
     return title, groups
@@ -249,16 +250,16 @@ def install_windows() -> None:
                     continue
                 gkey = f"{base}\\shell\\{gi:02d}_grup"
                 with winreg.CreateKey(HK, gkey) as k:
-                    winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, group)
+                    winreg.SetValueEx(k, "MUIVerb", 0, winreg.REG_SZ, T(group))
                     winreg.SetValueEx(k, "SubCommands", 0, winreg.REG_SZ, "")
                     winreg.SetValueEx(k, "MultiSelectModel", 0, winreg.REG_SZ, "Player")
                 for i, action in enumerate(acts):
                     _win_item(winreg, HK, f"{gkey}\\shell\\{i:02d}_{action.id}", action, pyw)
     _install_folder_menus(winreg, HK, pyw)
     _win_refresh_shell()
-    print(f"✔ Windows sağ tık menüsü eklendi ({len(all_extensions())} dosya türü + klasörler).")
-    print("  Windows 11: dosyaya sağ tık → 'Daha fazla seçenek göster' (veya Shift+F10)")
-    print("  → 'Riffle' alt menüleri.")
+    print(T("✔ Windows sağ tık menüsü eklendi ({0} dosya türü + klasörler).", len(all_extensions())))
+    print(T("  Windows 11: dosyaya sağ tık → 'Daha fazla seçenek göster' (veya Shift+F10)"))
+    print(T("  → 'Riffle' alt menüleri."))
 
 
 def uninstall_windows() -> None:
@@ -269,7 +270,7 @@ def uninstall_windows() -> None:
     for base, _ in WIN_FOLDER_BASES:
         _win_delete_tree(winreg.HKEY_CURRENT_USER, base)
     _win_refresh_shell()
-    print("✔ Windows sağ tık menüsü kaldırıldı.")
+    print(T("✔ Windows sağ tık menüsü kaldırıldı."))
 
 
 # --------------------------------------------------------------------------
@@ -293,12 +294,12 @@ def install_linux() -> None:
         if FOLDER in action.extensions:
             ext_line = ("dir;" + ext_line) if exts else "dir;"
         selection = "m" if action.multi_only else "notnone"
-        group = "" if action.id in favs or not action.group else action.group + " › "
+        group = "" if action.id in favs or not action.group else T(action.group) + " › "
         content = (
             "[Nemo Action]\n"
             "Active=true\n"
-            f"Name=Riffle › {group}{action.label}\n"
-            f"Comment={APP_NAME}: {action.label}\n"
+            f"Name=Riffle › {group}{T(action.label)}\n"
+            f"Comment={APP_NAME}: {T(action.label)}\n"
             f"Exec={prefix} {action.id} %F\n"
             "Icon-Name=document-export\n"
             f"Selection={selection}\n"
@@ -306,40 +307,40 @@ def install_linux() -> None:
             "Quote=double\n"
         )
         (NEMO_DIR / f"riffle_{action.id}.nemo_action").write_text(content, encoding="utf-8")
-    print(f"✔ Nemo eylemleri yazıldı: {NEMO_DIR}")
-    print("  Masaüstünde/Nemo'da dosyaya sağ tık → 'Riffle › …' satırları.")
-    print("  Görünmezse: nemo -q  (Nemo'yu yeniden başlatır)")
+    print(T("✔ Nemo eylemleri yazıldı: {0}", NEMO_DIR))
+    print(T("  Masaüstünde/Nemo'da dosyaya sağ tık → 'Riffle › …' satırları."))
+    print(T("  Görünmezse: nemo -q  (Nemo'yu yeniden başlatır)"))
 
 
 def uninstall_linux() -> None:
     for f in NEMO_DIR.glob("riffle_*.nemo_action"):
         f.unlink()
-    print("✔ Nemo eylemleri kaldırıldı.")
+    print(T("✔ Nemo eylemleri kaldırıldı."))
 
 
 # --------------------------------------------------------------------------
 
 def check_optional() -> None:
     """İsteğe bağlı dış programlar: yoksa ne kaybedildiğini ve nasıl kurulacağını söyle."""
-    print("» Ek bileşenler:")
+    print(T("» Ek bileşenler:"))
     from riffle.actions import _find_soffice
     if _find_soffice():
-        print("  ✔ LibreOffice: Word/Excel/PowerPoint → PDF hazır")
+        print(T("  ✔ LibreOffice: Word/Excel/PowerPoint → PDF hazır"))
     else:
-        print("  ✖ LibreOffice yok → Office → PDF çalışmaz (MS Office kuruluysa Windows'ta yine çalışır)")
+        print(T("  ✖ LibreOffice yok → Office → PDF çalışmaz (MS Office kuruluysa Windows'ta yine çalışır)"))
         print("    " + ("https://www.libreoffice.org/download" if IS_WIN else "sudo apt install libreoffice-core"))
     from riffle import ocr
     try:
         exe, langs = ocr.require()
         if "tur" in langs:
-            print(f"  ✔ Tesseract OCR ({langs}): taranmış PDF → metin hazır")
+            print(T("  ✔ Tesseract OCR ({0}): taranmış PDF → metin hazır", langs))
         else:
-            print("  ! Tesseract var ama Türkçe dil paketi yok → Türkçe harfler hatalı okunur")
-            print("    " + ("Tesseract kurulumunu tekrar çalıştır, 'Additional language data' → Turkish işaretle"
+            print(T("  ! Tesseract var ama Türkçe dil paketi yok → Türkçe harfler hatalı okunur"))
+            print("    " + (T("Tesseract kurulumunu tekrar çalıştır, 'Additional language data' → Turkish işaretle")
                           if IS_WIN else "sudo apt install tesseract-ocr-tur"))
     except ocr.OcrUnavailable:
-        print("  ✖ Tesseract yok → taranmış PDF'ler Word'e resim olarak geçer, OCR aracı çalışmaz")
-        print("    " + ("https://github.com/UB-Mannheim/tesseract/wiki (kurarken Turkish dilini işaretle)"
+        print(T("  ✖ Tesseract yok → taranmış PDF'ler Word'e resim olarak geçer, OCR aracı çalışmaz"))
+        print("    " + (T("https://github.com/UB-Mannheim/tesseract/wiki (kurarken Turkish dilini işaretle)")
                       if IS_WIN else "sudo apt install tesseract-ocr tesseract-ocr-tur"))
 
 
@@ -367,7 +368,7 @@ def main() -> None:
         try:
             check_optional()
         except ImportError:
-            print("  (ek bileşen kontrolü atlandı: önce kütüphaneler kurulmalı)")
+            print(T("  (ek bileşen kontrolü atlandı: önce kütüphaneler kurulmalı)"))
 
 
 if __name__ == "__main__":

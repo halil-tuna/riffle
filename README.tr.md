@@ -5,7 +5,7 @@
 iLovePDF'in araçları, internetsiz ve ücretsiz, doğrudan **sağ tık menüsünden**.
 Dosyaların bilgisayarından çıkmaz, sınır yok. Windows 11 ve Linux Mint (Cinnamon/Nemo, masaüstü dahil).
 
-![Sayfa düzenleyici](docs/screenshots/organizer.png)
+![Sayfa düzenleyici](docs/screenshots/tr/organizer.png)
 
 ## Araçlar
 
@@ -63,6 +63,8 @@ seçilir), **Kitapçık yap** (çift taraflı, kısa kenardan çevir, ortadan ka
 
 ### Word, Excel ve PowerPoint araçları
 
+- **Excel → PDF:** geniş tablolar sayfa genişliğine sığdırılır (gerekirse yatay), sütunlar ayrı sayfalara
+  bölünmez; satırlar sayfalara akar. Dosyada kendi ölçek/sığdırma ayarın varsa ona dokunulmaz.
 - **Küçült (içindeki resimleri sıkıştır):** .docx / .pptx / .xlsx içindeki fotoğraflar küçültülüp sıkıştırılır;
   fotoğraflı sunumlar e-postaya ve OBS'ye sığar. Saydam resimler ve çizimler net kalır, dosya açılabilir mi
   diye kaydetmeden önce denetlenir. Çıktı: `…_kucuk.pptx`.
@@ -125,6 +127,13 @@ Her dosya bir yer imi, her alt klasör bir üst yer imi; dosyaların kendi için
 burs/staj başvurusu sınırları için: sınırın altında kalan **en yüksek kaliteyi** arar; gerekirse son çare
 olarak sayfaları görüntüye çevirir (ve söyler). Hedefe inmek imkânsızsa açıkça belirtir.
 
+
+### Boyuta göre böl, A4'e çevir
+
+- **Boyuta göre böl…:** PDF'i her biri en fazla N MB olan parçalara ayırır (e-posta eki, OBS yükleme sınırı).
+  Sayfa sırası korunur, parçalar `…_parcalar` klasörüne gider. Tek sayfası bile sınırı aşıyorsa önce sıkıştır.
+- **Bütün sayfaları A4 yap:** Letter, A5, telefon taraması ve slayt karışık PDF'leri tek tip A4'e oturtur
+  (oran korunur, ortalanır, yatay sayfa yatay A4 olur). Metin ve çizimler vektör kalır, yani kalite düşmez.
 ### Tek tık araçları
 
 **PDF** (Windows'ta alt menülere ayrılmış):
@@ -134,7 +143,7 @@ olarak sayfaları görüntüye çevirir (ve söyler). Hedefe inmek imkânsızsa 
 | (üstte) | Sayfaları düzenle / birleştir… · İmza / yazı / logo ekle… · Formu doldur… · sık kullandıkların |
 | Dönüştür | PDF → Word · PDF → Word (birebir düzen) · PDF → Word (akan metin) · PDF → Excel (tablolar) · PDF → PowerPoint · PDF → JPG · PDF → Metin · İçindeki resimleri çıkar · PDF → Markdown · PDF/A'ya çevir (arşiv) · Taranmış PDF'i aranabilir yap (OCR) |
 | Düzenle | PDF'leri birleştir · Sayfa numarası ekle · Filigran ekle · Sağa / sola döndür · Ters çevir (180°) · Beyaz kenarları kırp · İki PDF'i karşılaştır |
-| Sayfalar | Her sayfayı ayrı PDF yap · Sayfa seç ve çıkar… · Sayfa sil… · Sayfa sırasını ters çevir · Boş sayfaları sil |
+| Sayfalar | Her sayfayı ayrı PDF yap · Sayfa seç ve çıkar… · Sayfa sil… · Sayfa sırasını ters çevir · Boş sayfaları sil · Bütün sayfaları A4 yap · Boyuta göre böl… |
 | Yazdır | 2 / 4 / 6 sayfayı 1 kâğıda · Kitapçık yap · Siyah-beyaz yap |
 | Küçült / Onar | Sıkıştır (önerilen) · Çok sıkıştır (e-posta için) · 2 MB / 5 MB altına indir · Hedef boyuta indir… · Taramayı düzelt · Bozuk PDF'i onar |
 | Güvenlik | Şifre koy · Şifreyi kaldır · Kişisel bilgileri karart… |
@@ -149,6 +158,8 @@ Görseldeki yazıyı çıkar · JPG / PNG'ye çevir · Küçült · Hedef boyuta
 ### Ayarlar
 
 Herhangi bir dosyaya sağ tık → **Ayarlar…** (ya da `python run.pyw --settings`):
+- **Dil:** sistem dili (Windows Türkçe değilse İngilizce) · Türkçe · English. Menüler hemen, pencereler bir
+  sonraki açılışta değişir; çıktı dosya adları da dile göre (`_birlesik` / `_merged`).
 - **Görünüm:** sistemle aynı (Windows koyu temadaysa Riffle da koyu) · açık · koyu. Pencereler Windows 11
   görünümünde (Sun Valley teması); koyu modda başlık çubuğu da koyulaşır.
 - **Menüyü sadeleştir:** kullanmadığın araçları gizle; istediklerini en üste sabitle. En çok kullandığın
@@ -196,15 +207,15 @@ Program belgenin türünü kendisi anlar:
 
 ## Kurulum — Windows 11 (kolay yol: kurulum dosyası)
 
-GitHub'daki **Releases** sayfasından `Riffle-0.9.2-kurulum.exe`'yi indir, çalıştır (yönetici yetkisi
+GitHub'daki **Releases** sayfasından `Riffle-1.0.0-setup.exe`'yi indir, çalıştır (yönetici yetkisi
 istemez). Sağ tık menüsü kendiliğinden eklenir; kaldırınca menü de silinir. Kurulumun son ekranındaki
 bağlantılardan isteğe bağlı bileşenleri kur: LibreOffice (Office → PDF), Tesseract (OCR, *Turkish*'i işaretle),
 Ghostscript (PDF/A).
 
-Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v0.9.2` gibi bir etiket (tag) gönderince
+Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v1.0.0` gibi bir etiket (tag) gönderince
 `.github/workflows/windows-exe.yml` Windows'ta testleri çalıştırır, PyInstaller ile paketler, paketi gerçek bir
-PDF'le dener, Inno Setup ile `…-kurulum.exe` yapar ve sürüme ekler. Elle de çalıştırılabilir
-(Actions → *Windows kurulum dosyası* → *Run workflow*; çıktı *Artifacts* altında).
+PDF'le dener, Inno Setup ile `…-setup.exe` yapar ve sürüme ekler. Elle de çalıştırılabilir
+(Actions → *Windows installer* → *Run workflow*; çıktı *Artifacts* altında).
 
 ## Kurulum — Windows 11 (kaynaktan)
 
@@ -268,6 +279,8 @@ riffle/settings.py      ayarlar, sık kullanılanlar, çıktı yeri, görünüm
 riffle/officetools.py   Office küçültme, Word birleştirme, CSV → Excel, not çıktısı, Office resimleri
 riffle/imagetools.py    görseldeki yazı (OCR), hedef boyut, PNG, döndürme
 riffle/update.py        yeni sürüm bildirimi (GitHub Releases)
+riffle/i18n.py          dil desteği: T("…"), sistem dili, ayar
+riffle/i18n_en.py       İngilizce çeviriler (kaynak metinler Türkçe; eksikler: python tests/i18n_scan.py)
 riffle/theme.py         ortak görünüm: Windows 11 teması, açık/koyu mod, renkler, simge
 riffle/assets/          uygulama simgesi (pencere + sağ tık menüsü)
 riffle/parallel.py      paralel toplu işlem, büyük PDF → Word'ü parçalama, İptal
