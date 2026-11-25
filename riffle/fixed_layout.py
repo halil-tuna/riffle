@@ -57,41 +57,71 @@ def map_font(name: str) -> str:
 
 # ---------------------------------------------------------------- page analysis
 
-def _lines(page, cmap=None):
-    """Horizontal text lines: [(bbox, [(text, font, size, bold, italic, color)])]"""
-    from .textfix import _fix_chars_raw
+def _text_dict(page):
     flags = (pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_PRESERVE_LIGATURES
              | pymupdf.TEXT_CID_FOR_UNKNOWN_UNICODE)   # keep the code: textfix resolves it from the glyph name
+    return page.get_text("dict", flags=flags)["blocks"]
+
+
+def _spans(ln, cmap):
+    """A line's spans as (text, font, size, bold, italic, color), lost symbols repaired."""
+    from .textfix import _fix_chars_raw
+    spans = []
+    prev_font = None
+    for s in ln["spans"]:
+        fm = (cmap or {}).get(s["font"].split("+", 1)[-1])
+        raw = s["text"]
+        _fix_chars_raw(s, fm)            # lost symbols like μ, ﬁ/ﬂ → fi/fl
+        if not s["text"]:
+            continue
+        font = s["font"]
+        symbol = bool(fm) and raw.strip() != "" and all(ch in fm or ch.isspace() for ch in raw)
+        if symbol and prev_font:         # the symbol font doesn't exist in Word: write the letter with the text font
+            font = prev_font
+        if not symbol:
+            prev_font = font
+        spans.append((s["text"], font, s["size"], bool(s["flags"] & 16) or "bold" in font.lower(),
+                      bool(s["flags"] & 2) or "italic" in font.lower(), s["color"]))
+    return spans
+
+
+def _lines(page, cmap=None, order: list | None = None):
+    """Horizontal text lines: [(bbox, [(text, font, size, bold, italic, color)])].
+    order (optional list) receives each returned block's position in the page's reading order."""
     out_blocks = []
-    for b in page.get_text("dict", flags=flags)["blocks"]:
+    for k, b in enumerate(_text_dict(page)):
         if b.get("type") != 0:
             continue
         lines = []
         for ln in b["lines"]:
             dx, dy = ln["dir"]
-            if abs(dy) > 0.01 or dx < 0:          # vertical/rotated text stays in the background
+            if abs(dy) > 0.01 or dx < 0:          # vertical/rotated text: see _vertical_lines
                 continue
-            spans = []
-            prev_font = None
-            for s in ln["spans"]:
-                fm = (cmap or {}).get(s["font"].split("+", 1)[-1])
-                raw = s["text"]
-                _fix_chars_raw(s, fm)            # lost symbols like μ, ﬁ/ﬂ → fi/fl
-                if not s["text"]:
-                    continue
-                font = s["font"]
-                symbol = bool(fm) and raw.strip() != "" and all(ch in fm or ch.isspace() for ch in raw)
-                if symbol and prev_font:         # the symbol font doesn't exist in Word: write the letter with the text font
-                    font = prev_font
-                if not symbol:
-                    prev_font = font
-                spans.append((s["text"], font, s["size"], bool(s["flags"] & 16) or "bold" in font.lower(),
-                              bool(s["flags"] & 2) or "italic" in font.lower(), s["color"]))
+            spans = _spans(ln, cmap)
             if "".join(t for t, *_ in spans).strip():
                 lines.append((pymupdf.Rect(ln["bbox"]), spans))
         if lines:
             out_blocks.append(lines)
+            if order is not None:
+                order.append(k)
     return out_blocks
+
+
+def _vertical_lines(page, cmap=None):
+    """Text turned by 90° or 270° (side labels like 'Third Edition' on slides):
+    [(bbox, spans, 'vert' | 'vert270', reading-order position)]. Other angles stay in the background."""
+    out = []
+    for k, b in enumerate(_text_dict(page)):
+        if b.get("type") != 0:
+            continue
+        for ln in b["lines"]:
+            dx, dy = ln["dir"]
+            if abs(dx) > 0.01 or abs(abs(dy) - 1) > 0.01:
+                continue
+            spans = _spans(ln, cmap)
+            if "".join(t for t, *_ in spans).strip():
+                out.append((pymupdf.Rect(ln["bbox"]), spans, "vert" if dy > 0 else "vert270", k))
+    return out
 
 
 def _background(doc, pno: int, blocks) -> bytes:
@@ -155,14 +185,14 @@ def _picture(rid: str, w, h) -> str:
             '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>')
 
 
-def _textbox(paras: str, w, h) -> str:
+def _textbox(paras: str, w, h, vert: str = "horz") -> str:
     return ('<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
             '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">'
             '<wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr>'
             f'<a:xfrm><a:off x="0" y="0"/><a:ext cx="{round(w * EMU)}" cy="{round(h * EMU)}"/></a:xfrm>'
             '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>'
             f'<wps:txbx><w:txbxContent>{paras}</w:txbxContent></wps:txbx>'
-            '<wps:bodyPr rot="0" wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0">'
+            f'<wps:bodyPr rot="0" vert="{vert}" wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0">'
             '<a:spAutoFit/></wps:bodyPr></wps:wsp></a:graphicData></a:graphic>')
 
 
@@ -218,6 +248,18 @@ def _block_xml(lines) -> str:
     return _anchor(box.x0, box.y0, width, height, _textbox("".join(paras), width, height), False, "Metin")
 
 
+def _vertical_xml(rect, spans, vert: str) -> str:
+    """One turned line → a text box whose text runs top-to-bottom ('vert') or bottom-to-top
+    ('vert270'). The box keeps the line's page rectangle; the line's thickness is its line height."""
+    size = max(s[2] for s in spans)
+    line_h = max(rect.width, size * 1.05)
+    length = rect.height * 1.12 + 4      # room if the Word font comes out slightly longer
+    y = rect.y0 if vert == "vert" else rect.y1 - length
+    ppr = (f'<w:pPr><w:spacing w:before="0" w:after="0" w:line="{round(line_h * TWIP)}" w:lineRule="exact"/></w:pPr>')
+    para = "<w:p>" + ppr + "".join(_run(*s) for s in spans) + "</w:p>"
+    return _anchor(rect.x0, y, line_h, length, _textbox(para, line_h, length, vert), False, "Metin")
+
+
 NS = ('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
       'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
@@ -241,11 +283,18 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None, name: str 
     for pno, page in enumerate(doc):
         progress(T("{0}: sayfa {1}/{2} (birebir düzen)", name, pno + 1, n))
         W, H = page.rect.width, page.rect.height
-        blocks = _lines(page, cmap)
+        order: list[int] = []
+        blocks = _lines(page, cmap, order)
+        turned = _vertical_lines(page, cmap)
         rid = f"rIdImg{pno + 1}"
-        media.append((rid, _background(doc, pno, blocks)))
+        media.append((rid, _background(doc, pno, blocks + [[(r, sp)] for r, sp, _, _ in turned])))
         content = _anchor(0, 0, W, H, _picture(rid, W, H), True, "Arka plan")
-        content += "".join(_block_xml(g) for b in blocks for g in _stack_groups(b))
+        # text boxes in the PDF's reading order (copy / select-all / screen readers follow it)
+        # (built after sorting: a box's number is also its drawing order)
+        boxes = [(k, 0, lambda b=b: "".join(_block_xml(g) for g in _stack_groups(b)))
+                 for k, b in zip(order, blocks)]
+        boxes += [(k, 1, lambda r=r, sp=sp, v=v: _vertical_xml(r, sp, v)) for r, sp, v, k in turned]
+        content += "".join(make() for _, _, make in sorted(boxes, key=lambda t: (t[0], t[1])))
         orient = ' w:orient="landscape"' if W > H else ""
         sect = (f'<w:sectPr><w:pgSz w:w="{round(W * TWIP)}" w:h="{round(H * TWIP)}"{orient}/>'
                 '<w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/>'

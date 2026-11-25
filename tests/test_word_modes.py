@@ -377,3 +377,27 @@ def test_exact_layout_pen_mark_renders_in_place(tmp_path):
         want = next(x.rect for x in a[1].annots() if x.type[1] == "Ink")
         boxes = [pymupdf.Rect(i["bbox"]) for i in r[1].get_image_info()]
         assert any(abs(b.x0 - want.x0) < 2 and abs(b.y0 - want.y0) < 2 and b.width < 400 for b in boxes)
+
+
+def test_exact_layout_turned_text_becomes_vertical_text_box(tmp_path):
+    """Side labels turned by 90°/270° on slides ('Third Edition') used to stay in the background
+    picture only: now they are editable vertical text boxes, in the PDF's reading order."""
+    src = tmp_path / "yan.pdf"
+    d = pymupdf.open()
+    p = d.new_page(width=720, height=540)
+    _text(p, (60, 40), "MECHANICS OF MATERIALS", 28)
+    p.insert_text((20, 20), "Third Edition", fontsize=12, rotate=-90)   # reads top to bottom
+    p.insert_text((700, 500), "Sayfa kenarı", fontsize=10, rotate=90)    # reads bottom to top
+    _text(p, (60, 120), "Pure bending of symmetric members.", 18)
+    d.save(src)
+    with pymupdf.open(src) as chk:
+        dirs = {round(l["dir"][1]) for b in chk[0].get_text("dict")["blocks"] for l in b.get("lines", [])}
+    assert {1, -1} <= dirs
+    out = pdf_to_word([src], noop)[0]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    boxes = re.findall(r'<wps:wsp>.*?</wps:wsp>', xml, re.S)
+    def box_of(text):
+        return next(b for b in boxes if text in "".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", b)))
+    assert 'vert="vert"' in box_of("Third Edition")
+    assert 'vert="vert270"' in box_of("Sayfa kenar")
+    assert 'vert="horz"' in box_of("MECHANICS")
