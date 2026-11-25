@@ -452,3 +452,30 @@ def test_pen_heavy_pages_go_exact_and_hidden_text_is_dropped(tmp_path):
     assert any("el yazılı" in m or "handwritten notes" in m for m in msgs)
     xml = zipfile.ZipFile(out).read("word/document.xml").decode()
     assert "buck converter" in xml and "断" not in xml and "若" not in xml
+
+
+def test_exact_layout_keeps_bullet_gap_and_justified_spaces(tmp_path):
+    """Slides: the gap after a bullet and the wide spaces of a justified line are kept (as
+    character spacing on the space), and words a PDF stores as separate pieces on one baseline
+    come back as one line with spaces - not glued together."""
+    from riffle import fixed_layout as fl
+    src = tmp_path / "madde.pdf"
+    d = pymupdf.open()
+    p = d.new_page(width=720, height=540)
+    p.insert_text((60, 100), "*", fontsize=18)                  # bullet …
+    p.insert_text((90, 100), "Durgun bir akiskan", fontsize=18)      # … its text 30 pt further
+    for x, w in ((60, "Duz"), (150, "bir"), (230, "yuzey"), (330, "uzerine")):   # justified words
+        p.insert_text((x, 160), w, fontsize=18)
+    d.save(src)
+    with pymupdf.open(src) as chk:
+        lines = [ln for b in fl._lines(chk[0], spacing=True) for ln in b]
+    texts = ["".join(t for t, *_ in sp) for _, sp in lines]
+    assert any(t.startswith("* Durgun") for t in texts)
+    assert any(t == "Duz bir yuzey uzerine" for t in texts)
+    for _, sp in lines:
+        assert any(len(s) == 7 and s[0] == " " and s[6] > 5 for s in sp)   # widened spaces carried
+    out = pdf_to_word([src], noop)[0]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert re.search(r'<w:spacing w:val="\d{3,}"/>', xml)               # ≥ 5 pt as character spacing
+    from lxml import etree
+    etree.fromstring(xml.encode())

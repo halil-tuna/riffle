@@ -57,15 +57,112 @@ def map_font(name: str) -> str:
 
 # ---------------------------------------------------------------- page analysis
 
-def _text_dict(page):
+def _text_dict(page, raw: bool = False):
     flags = (pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_PRESERVE_LIGATURES
              | pymupdf.TEXT_CID_FOR_UNKNOWN_UNICODE)   # keep the code: textfix resolves it from the glyph name
-    return page.get_text("dict", flags=flags)["blocks"]
+    blocks = page.get_text("rawdict" if raw else "dict", flags=flags)["blocks"]
+    if raw:
+        for b in blocks:
+            for ln in b.get("lines", []):
+                for sp in ln["spans"]:
+                    sp["text"] = "".join(c["c"] for c in sp.get("chars", []))
+    return blocks
+
+
+def _space_em(font: str) -> float:
+    """Width of a normal space in the Word font that stands in for this PDF font (em)."""
+    f = map_font(font).lower()
+    if "courier" in f or "mono" in f or "consol" in f:
+        return 0.6
+    if "calibri" in f or "carlito" in f:
+        return 0.226
+    if "cambria" in f or "times" in f or "georgia" in f or "garamond" in f or "serif" in f:
+        return 0.25
+    return 0.278
+
+
+def _spaced(ln, spans):
+    """The gaps of the PDF line, kept: a justified line's wide spaces and the tab after a bullet
+    ('•' + gap + text) came out as plain spaces, so lines ended short and bullets stuck to
+    their text. Returns spans split at wide gaps, each with the extra space in pt (7th item)."""
+    chars = []
+    for k, sp in enumerate(ln["spans"]):
+        for c in sp.get("chars", []):
+            chars.append((k, c))
+    if len(chars) < 2 or len(spans) != len(ln["spans"]):
+        return [(*s, 0.0) for s in spans]
+    out = []
+    pieces = {k: [] for k in range(len(spans))}      # per span: (start, end, extra after)
+    for k in range(len(spans)):
+        pieces[k] = []
+    joins = ln.get("joins", set())
+    for i, (k, c) in enumerate(chars):
+        if i + 1 >= len(chars):
+            break
+        k2, nxt = chars[i + 1]
+        size = spans[k][2]
+        natural = _space_em(spans[k][1]) * size
+        if c["c"] == " ":
+            extra = (nxt["origin"][0] - c["origin"][0]) - natural
+        elif k2 != k and nxt["c"] != " ":
+            gap = nxt["bbox"][0] - c["bbox"][2]
+            if k2 in joins:
+                # pieces of one visual line stored apart (justified words): always a space between
+                pieces[k].append(("gap", max(0.0, gap - natural) or 1e-9))
+            elif gap > 1.3 * natural:
+                # two spans with a gap but no space character between them (a bullet and its text)
+                pieces[k].append(("gap", gap - natural))
+            continue
+        else:
+            continue
+        if extra > 0.6:
+            pieces[k].append((i, extra))
+    # rebuild: walk each span's characters, cutting after every widened space
+    idx = 0
+    for k, s in enumerate(spans):
+        text, *style = s
+        own = [c for kk, c in chars if kk == k]
+        start = idx
+        idx += len(own)
+        widened = {i - start: extra for i, extra in pieces[k] if i != "gap"}
+        tail_gap = sum(extra for i, extra in pieces[k] if i == "gap")
+        if len(own) != len(text) or not widened:
+            out.append((text, *style, 0.0))
+        else:
+            cut = 0
+            for j in sorted(widened):
+                if j > cut:
+                    out.append((text[cut:j], *style, 0.0))
+                out.append((" ", *style, widened[j]))
+                cut = j + 1
+            if cut < len(text):
+                out.append((text[cut:], *style, 0.0))
+        if tail_gap:
+            out.append((" ", *style, tail_gap if tail_gap > 1e-6 else 0.0))
+    return out
+
+
+def _join_baselines(lines: list) -> list:
+    """PDF writers store a justified line's words (or a label and its value) as separate lines
+    on the same baseline. Join them back into one line, left to right; 'joins' marks the spans
+    where a stored line began (a space goes there)."""
+    out = []
+    for ln in sorted(lines, key=lambda l: (round(l["bbox"][1], 0), l["bbox"][0])):
+        prev = out[-1] if out else None
+        if (prev and abs(prev["bbox"][1] - ln["bbox"][1]) < 1.0 and abs(prev["bbox"][3] - ln["bbox"][3]) < 1.0
+                and ln["bbox"][0] >= prev["bbox"][2] - 0.5 and tuple(prev["dir"]) == tuple(ln["dir"])):
+            prev.setdefault("joins", set()).add(len(prev["spans"]))
+            prev["spans"] = prev["spans"] + ln["spans"]
+            prev["bbox"] = (prev["bbox"][0], min(prev["bbox"][1], ln["bbox"][1]),
+                            ln["bbox"][2], max(prev["bbox"][3], ln["bbox"][3]))
+        else:
+            out.append(dict(ln))
+    return out
 
 
 def _spans(ln, cmap):
     """A line's spans as (text, font, size, bold, italic, color), lost symbols repaired."""
-    from .textfix import _fix_chars_raw
+    from .textfix import _bad, _fix_chars_raw
     spans = []
     prev_font = None
     for s in ln["spans"]:
@@ -76,6 +173,10 @@ def _spans(ln, cmap):
         fm = (cmap or {}).get(s["font"].split("+", 1)[-1])
         raw = s["text"]
         _fix_chars_raw(s, fm)            # lost symbols like μ, ﬁ/ﬂ → fi/fl
+        if "chars" in s:                 # raw spans (spacing=True): the text comes from the fixed chars
+            if not fm:                   # control characters / unknown codes, as the text path drops them
+                s["chars"] = [c for c in s["chars"] if not _bad.search(c["c"])]
+            s["text"] = "".join(c["c"] for c in s["chars"])
         if not s["text"]:
             continue
         font = s["font"]
@@ -89,19 +190,26 @@ def _spans(ln, cmap):
     return spans
 
 
-def _lines(page, cmap=None, order: list | None = None):
+def _lines(page, cmap=None, order: list | None = None, spacing: bool = False):
     """Horizontal text lines: [(bbox, [(text, font, size, bold, italic, color)])].
-    order (optional list) receives each returned block's position in the page's reading order."""
+    order (optional list) receives each returned block's position in the page's reading order.
+    spacing=True (Word): spans carry a 7th item, extra space in pt after them (see _spaced)."""
     out_blocks = []
-    for k, b in enumerate(_text_dict(page)):
+    for k, b in enumerate(_text_dict(page, raw=spacing)):
         if b.get("type") != 0:
             continue
         lines = []
-        for ln in b["lines"]:
+        src_lines = b["lines"]
+        if spacing:
+            flat = [ln for ln in src_lines if abs(ln["dir"][1]) <= 0.01 and ln["dir"][0] > 0]
+            src_lines = _join_baselines(flat)
+        for ln in src_lines:
             dx, dy = ln["dir"]
             if abs(dy) > 0.01 or dx < 0:          # vertical/rotated text: see _vertical_lines
                 continue
             spans = _spans(ln, cmap)
+            if spacing:
+                spans = _spaced(ln, spans)
             if "".join(t for t, *_ in spans).strip():
                 lines.append((pymupdf.Rect(ln["bbox"]), spans))
         if lines:
@@ -145,11 +253,14 @@ def _background(doc, pno: int, blocks) -> bytes:
 
 # ---------------------------------------------------------------- XML generation
 
-def _run(text, font, size, bold, italic, color) -> str:
+def _run(text, font, size, bold, italic, color, extra: float = 0.0) -> str:
+    """extra: points of character spacing added after each character (a widened space)."""
     f = escape(map_font(font), {'"': "&quot;"})
     rpr = (f'<w:rFonts w:ascii="{f}" w:hAnsi="{f}" w:cs="{f}" w:eastAsia="{f}"/>'
            + ("<w:b/>" if bold else "") + ("<w:i/>" if italic else "")
-           + f'<w:color w:val="{color:06X}"/><w:sz w:val="{max(2, round(size * 2))}"/>'
+           + f'<w:color w:val="{color:06X}"/>'
+           + (f'<w:spacing w:val="{round(extra * 20)}"/>' if extra else "")
+           + f'<w:sz w:val="{max(2, round(size * 2))}"/>'
            f'<w:szCs w:val="{max(2, round(size * 2))}"/>')
     return f'<w:r><w:rPr>{rpr}</w:rPr><w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
 
@@ -290,7 +401,7 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None, name: str 
         progress(T("{0}: sayfa {1}/{2} (birebir düzen)", name, pno + 1, n))
         W, H = page.rect.width, page.rect.height
         order: list[int] = []
-        blocks = _lines(page, cmap, order)
+        blocks = _lines(page, cmap, order, spacing=True)
         turned = _vertical_lines(page, cmap)
         rid = f"rIdImg{pno + 1}"
         media.append((rid, _background(doc, pno, blocks + [[(r, sp)] for r, sp, _, _ in turned])))
