@@ -375,11 +375,8 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
             if kind:
                 # Slides and two-column papers: lines/pages shift in flowing text, use the exact layout
                 progress(T("ℹ {0}: {1} algılandı, birebir düzen kullanıldı (yazılar yerinde düzenlenebilir). Akan metin için: 'PDF → Word (akan metin)'.", p.name, kind))
-                fixed_layout.convert(src, out, progress)
-                if ink:
-                    progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", p.name, len(ink)))
-                if notes:
-                    progress(T("ℹ {0}: {1} PDF notu metinde yeri bulunamadığı için aktarılmadı.", p.name, len(notes)))
+                fixed_layout.convert(src, out, progress, name=p.name)
+                _carry_marks(out, p.name, ink, notes, progress, fixed=True)
                 outputs.append(out)
                 continue
             with pymupdf.open(src) as d:
@@ -416,22 +413,7 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
             if fixes["glyph"]:
                 progress(T("ℹ {0}: {1} özel karakter (μ, α, ± …) kurtarıldı.", p.name, fixes['glyph']))
         _unclip_table_rows(out, info)
-        if ink:
-            try:
-                placed = _add_ink(out, ink)
-            except Exception:
-                placed = 0
-            if placed < len(ink):
-                progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", p.name, len(ink) - placed))
-        if notes:
-            try:
-                added = _add_comments(out, notes)
-            except Exception:
-                added = 0
-            if added:
-                progress(T("ℹ {0}: PDF'teki {1} not Word yorumu olarak eklendi.", p.name, added))
-            if added < len(notes):
-                progress(T("ℹ {0}: {1} PDF notu metinde yeri bulunamadığı için aktarılmadı.", p.name, len(notes) - added))
+        _carry_marks(out, p.name, ink, notes, progress)
         outputs.append(out)
     return outputs
 
@@ -473,11 +455,72 @@ def _collect_ink(doc) -> list[dict]:
     return items
 
 
-def _add_ink(docx: Path, items: list[dict]) -> int:
+def _carry_marks(out: Path, name: str, ink: list, notes: list, progress, fixed: bool = False) -> None:
+    """Pen marks and notes from the PDF into the finished Word file (both layouts)."""
+    if ink:
+        try:
+            placed = _add_ink(out, ink, fixed)
+        except Exception:
+            placed = 0
+        if placed < len(ink):
+            progress(T("ℹ {0}: {1} el yazısı işaret (kalem/tik) Word'e aktarılmadı.", name, len(ink) - placed))
+    if notes:
+        try:
+            added = _add_comments(out, notes, fixed)
+        except Exception:
+            added = 0
+        if added:
+            progress(T("ℹ {0}: PDF'teki {1} not Word yorumu olarak eklendi.", name, added))
+        if added < len(notes):
+            progress(T("ℹ {0}: {1} PDF notu metinde yeri bulunamadığı için aktarılmadı.", name, len(notes) - added))
+
+
+def _page_paragraphs(xml: str, body: int) -> list[tuple[int, int, str]]:
+    """Top-level body paragraphs (their text boxes' paragraphs don't count). In the exact-layout
+    Word file each one is a page: it holds that page's background and text boxes."""
+    out, depth, start = [], 0, 0
+    for m in re.finditer(r'<w:p[ >]|</w:p>', xml[body:]):
+        if m.group(0) == "</w:p>":
+            depth -= 1
+            if depth == 0:
+                out.append((start, body + m.end(), xml[start:body + m.end()]))
+        else:
+            if depth == 0:
+                start = body + m.start()
+            depth += 1
+    return out
+
+
+def _ink_paragraph(it: dict, texts: list[str], search_from: int, paras) -> tuple:
+    """Flowing text: the paragraph holding the marked line and its top in the PDF."""
+    key = _norm(it["line"])[:40]
+    if len(key) < 6:
+        return None, 0, ""
+    # paragraphs come in page order: search forward from the last hit first
+    order = list(range(search_from, len(paras))) + list(range(0, search_from))
+    hit = next((i for i in order if key in texts[i]), None)
+    if hit is None:
+        return None, 0, ""
+    # top of that paragraph in the PDF: the earliest line of the block that starts it
+    top = None
+    for r, t in it["above"]:
+        if len(_norm(t)) >= 4 and texts[hit].startswith(_norm(t)[:15]):
+            top = r.y0
+            break
+    if top is None:
+        return None, 0, ""
+    # 'relative to paragraph' counts from above the paragraph's space-before
+    sb = re.search(r'<w:spacing\b[^>]*w:before="(\d+)"', paras[hit][2])
+    top -= int(sb.group(1)) / 20 if sb else 0
+    return hit, top, "paragraph"
+
+
+def _add_ink(docx: Path, items: list[dict], fixed: bool = False) -> int:
     """Puts the pen marks back into the Word file as pictures floating over the text (wrapNone:
     they push nothing). Vertically they hang on the paragraph that holds the marked line, so
     they move with it when the text reflows; horizontally they sit where they were on the page.
-    Returns how many could be placed."""
+    In the exact layout (fixed=True) nothing reflows: they go on their page's paragraph,
+    positioned on the page. Returns how many could be placed."""
     import zipfile
     from .fixed_layout import EMU
     if not items:
@@ -487,40 +530,32 @@ def _add_ink(docx: Path, items: list[dict]) -> int:
         rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
         types = z.read("[Content_Types].xml").decode("utf-8")
     body = xml.find("<w:body>")
-    paras = [(m.start(), m.end(), m.group(0)) for m in
-             re.finditer(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', xml[body:], re.S)]
+    if fixed:
+        paras = [(a - body, b - body, p) for a, b, p in _page_paragraphs(xml, body)]
+    else:
+        paras = [(m.start(), m.end(), m.group(0)) for m in
+                 re.finditer(r'<w:p[ >](?:(?!<w:p[ >]).)*?</w:p>', xml[body:], re.S)]
     texts = [_norm("".join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', p))) for _, _, p in paras]
     inserts, media, placed, search_from = {}, [], 0, 0
     for n, it in enumerate(items):
-        key = _norm(it["line"])[:40]
-        if len(key) < 6:
-            continue
-        # paragraphs come in page order: search forward from the last hit first
-        order = list(range(search_from, len(paras))) + list(range(0, search_from))
-        hit = next((i for i in order if key in texts[i]), None)
-        if hit is None:
-            continue
-        search_from = hit
-        # top of that paragraph in the PDF: the earliest line of the block that starts it
-        top = None
-        for r, t in it["above"]:
-            if len(_norm(t)) >= 4 and texts[hit].startswith(_norm(t)[:15]):
-                top = r.y0
-                break
-        if top is None:
-            continue
-        # 'relative to paragraph' counts from above the paragraph's space-before
-        sb = re.search(r'<w:spacing\b[^>]*w:before="(\d+)"', paras[hit][2])
-        top -= int(sb.group(1)) / 20 if sb else 0
+        if fixed:
+            if it["page"] >= len(paras):
+                continue
+            hit, top, vref = it["page"], 0.0, "page"
+        else:
+            hit, top, vref = _ink_paragraph(it, texts, search_from, paras)
+            if hit is None:
+                continue
+            search_from = hit
         r = it["rect"]
         rid = f"rIdInk{n + 1}"
         media.append((rid, it["png"]))
-        did = 9000 + n
+        did = 90000 + n
         run = (f'<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" '
                f'relativeHeight="{did}" behindDoc="0" locked="0" layoutInCell="0" allowOverlap="1">'
                f'<wp:simplePos x="0" y="0"/>'
                f'<wp:positionH relativeFrom="page"><wp:posOffset>{round(r.x0 * EMU)}</wp:posOffset></wp:positionH>'
-               f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{round((r.y0 - top) * EMU)}</wp:posOffset></wp:positionV>'
+               f'<wp:positionV relativeFrom="{vref}"><wp:posOffset>{round((r.y0 - top) * EMU)}</wp:posOffset></wp:positionV>'
                f'<wp:extent cx="{round(r.width * EMU)}" cy="{round(r.height * EMU)}"/>'
                f'<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>'
                f'<wp:docPr id="{did}" name="Pen {n + 1}"/><wp:cNvGraphicFramePr/>'
@@ -640,11 +675,12 @@ def _comment_paras(text: str) -> str:
                    for line in text.splitlines() or [""])
 
 
-def _add_comments(docx: Path, notes: list[dict]) -> int:
+def _add_comments(docx: Path, notes: list[dict], fixed: bool = False) -> int:
     """Turns the PDF's notes into real Word comments (balloons in the margin, can be answered
-    and resolved), each spanning the text it was written on. Returns how many were placed."""
+    and resolved), each spanning the text it was written on. In the exact layout (fixed=True)
+    the text sits in text boxes, where comments are not safe in every Word version: there the
+    comment goes on its page and quotes the marked text. Returns how many were placed."""
     import zipfile
-    from xml.sax.saxutils import quoteattr
     if not notes:
         return 0
     with zipfile.ZipFile(docx) as z:
@@ -655,6 +691,8 @@ def _add_comments(docx: Path, notes: list[dict]) -> int:
         rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
         types = z.read("[Content_Types].xml").decode("utf-8")
     body = xml.find("<w:body>")
+    if fixed:
+        return _add_page_comments(docx, notes, xml, rels, types, body)
     runs = [(m.start(), m.end()) for m in re.finditer(r'<w:r>(?:(?!</w:r>).)*?</w:r>', xml[body:], re.S)]
     runs = [(s + body, e + body) for s, e in runs]
     # normalized text of the whole body, and for each character the run it came from
@@ -693,12 +731,7 @@ def _add_comments(docx: Path, notes: list[dict]) -> int:
         a, b = owner[i], owner[i + len(key) - 1]
         starts.setdefault(a, []).append(cid)
         ends.setdefault(b, []).append(cid)
-        text = note["text"] + "".join(f"\n— {who or 'PDF'}: {t}" for who, t in note["replies"])
-        author = note["author"] or "PDF"
-        initials = "".join(w[0] for w in author.split()[:3]).upper() or "P"
-        date = f' w:date="{note["date"]}"' if note["date"] else ""
-        comments.append(f'<w:comment w:id="{cid}" w:author={quoteattr(author)} w:initials={quoteattr(initials)}{date}>'
-                        f'{_comment_paras(text)}</w:comment>')
+        comments.append(_comment_xml(cid, note))
     if not comments:
         return 0
     out, pos = [], 0
@@ -714,6 +747,50 @@ def _add_comments(docx: Path, notes: list[dict]) -> int:
                                for c in ends[k]))
             pos = e
     xml = "".join(out) + xml[pos:]
+    _write_comments(docx, xml, rels, types, comments)
+    return len(comments)
+
+
+def _comment_xml(cid: int, note: dict, quote: str = "") -> str:
+    from xml.sax.saxutils import quoteattr
+    text = (f"“{quote}”\n" if quote else "") + note["text"]
+    text += "".join(f"\n— {who or 'PDF'}: {t}" for who, t in note["replies"])
+    author = note["author"] or "PDF"
+    initials = "".join(w[0] for w in author.split()[:3]).upper() or "P"
+    date = f' w:date="{note["date"]}"' if note["date"] else ""
+    return (f'<w:comment w:id="{cid}" w:author={quoteattr(author)} w:initials={quoteattr(initials)}{date}>'
+            f'{_comment_paras(text)}</w:comment>')
+
+
+def _add_page_comments(docx: Path, notes: list[dict], xml: str, rels: str, types: str, body: int) -> int:
+    pages = _page_paragraphs(xml, body)
+    by_page, comments = {}, []
+    for note in notes:
+        if note["page"] >= len(pages):
+            continue
+        cid = len(comments)
+        quote = " ".join(note["target"].split())
+        quote = quote if len(quote) <= 80 else quote[:77] + "…"
+        comments.append(_comment_xml(cid, note, quote))
+        by_page.setdefault(note["page"], []).append(cid)
+    if not comments:
+        return 0
+    out, pos = [], 0
+    for pno in sorted(by_page):
+        start, _, p = pages[pno]
+        m = re.match(r'<w:p(?: [^>]*)?>(?:<w:pPr>.*?</w:pPr>)?', p, re.S)
+        cut = start + m.end()
+        out.append(xml[pos:cut])
+        out.append("".join(f'<w:commentRangeStart w:id="{c}"/><w:commentRangeEnd w:id="{c}"/>'
+                           f'<w:r><w:commentReference w:id="{c}"/></w:r>' for c in by_page[pno]))
+        pos = cut
+    xml = "".join(out) + xml[pos:]
+    _write_comments(docx, xml, rels, types, comments)
+    return len(comments)
+
+
+def _write_comments(docx: Path, xml: str, rels: str, types: str, comments: list[str]) -> None:
+    import zipfile
     part = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
             + "".join(comments) + '</w:comments>')
@@ -735,7 +812,6 @@ def _add_comments(docx: Path, notes: list[dict]) -> int:
             zout.writestr(item, data)
         zout.writestr("word/comments.xml", part.encode("utf-8"))
     os.replace(tmp, docx)
-    return len(comments)
 
 
 def _parallel_enabled() -> bool:

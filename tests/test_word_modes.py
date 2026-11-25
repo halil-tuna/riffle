@@ -322,3 +322,58 @@ def test_pdf_notes_become_word_comments(tmp_path):
     assert "kum saati" in covered[omer] or covered[omer].startswith("Bekçi")   # not the heading's 'bekçi'
     assert "Koruma" not in covered[omer]
     assert any("Word yorumu" in m or "Word comments" in m for m in msgs)
+
+
+def _annotated_slides(path):
+    d = pymupdf.open()
+    for k in range(2):
+        p = d.new_page(width=842, height=595)                 # landscape → slides → exact layout
+        _text(p, (60, 80), f"Slayt {k + 1}: Darbe üreteci", 28)
+        _text(p, (60, 140), "MOSFET sürücüsü bootstrap kondansatörüyle beslenir.", 16)
+    d.save(path)
+    d = pymupdf.open(path)
+    p = d[1]
+    h = p.add_highlight_annot(p.search_for("bootstrap")[0])
+    h.set_info(content="Bootstrap nedir?", title="Ömer")
+    h.update()
+    a = p.add_ink_annot([[(60, 160), (200, 162), (330, 159)]])
+    a.set_border(width=2)
+    a.update()
+    d.save(path, incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP)
+
+
+def test_exact_layout_carries_pen_marks_and_notes(tmp_path):
+    """Slides (exact layout): the pen mark is pinned on its page, the note becomes a comment on
+    that page quoting the marked text - no 'not carried over' notices."""
+    src = tmp_path / "slayt.pdf"
+    _annotated_slides(src)
+    msgs = []
+    out = pdf_to_word([src], msgs.append)[0]
+    assert any("birebir" in m or "exact layout" in m for m in msgs)
+    assert not any("aktarılmadı" in m or "not carried" in m for m in msgs)
+    z = zipfile.ZipFile(out)
+    xml = z.read("word/document.xml").decode()
+    com = z.read("word/comments.xml").decode()
+    from lxml import etree
+    etree.fromstring(xml.encode()), etree.fromstring(com.encode())
+    pen = re.search(r'<wp:anchor[^>]*>(?:(?!</wp:anchor>).)*name="Pen 1".*?</wp:anchor>', xml, re.S).group(0)
+    assert 'positionV relativeFrom="page"' in pen
+    assert "bootstrap" in com and "Bootstrap nedir?" in com and 'w:author="Ömer"' in com
+    # both on the second page: after the first page's section break
+    first_page_end = xml.find("</w:sectPr>")
+    assert xml.find('name="Pen 1"') > first_page_end and xml.find("<w:commentReference") > first_page_end
+
+
+@needs_soffice
+def test_exact_layout_pen_mark_renders_in_place(tmp_path):
+    import subprocess
+    src = tmp_path / "slayt.pdf"
+    _annotated_slides(src)
+    out = pdf_to_word([src], noop)[0]
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", str(tmp_path / "r"), str(out)],
+                   check=True, capture_output=True, timeout=180)
+    with pymupdf.open(src) as a, pymupdf.open(tmp_path / "r" / (out.stem + ".pdf")) as r:
+        want = next(x.rect for x in a[1].annots() if x.type[1] == "Ink")
+        boxes = [pymupdf.Rect(i["bbox"]) for i in r[1].get_image_info()]
+        assert any(abs(b.x0 - want.x0) < 2 and abs(b.y0 - want.y0) < 2 and b.width < 400 for b in boxes)

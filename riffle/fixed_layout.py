@@ -228,8 +228,10 @@ NS = ('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
       'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" mc:Ignorable="w14"')
 
 
-def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None) -> None:
+def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None, name: str | None = None) -> None:
+    """name: the file name to show in progress messages (pdf_path may be a temporary copy)."""
     _ids["n"] = 0
+    name = name or pdf_path.name
     doc = pymupdf.open(pdf_path)
     from .textfix import build_char_map
     cmap = build_char_map(doc)
@@ -237,7 +239,7 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None) -> None:
     body: list[str] = []
     n = len(doc)
     for pno, page in enumerate(doc):
-        progress(T("{0}: sayfa {1}/{2} (birebir düzen)", pdf_path.name, pno + 1, n))
+        progress(T("{0}: sayfa {1}/{2} (birebir düzen)", name, pno + 1, n))
         W, H = page.rect.width, page.rect.height
         blocks = _lines(page, cmap)
         rid = f"rIdImg{pno + 1}"
