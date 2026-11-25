@@ -323,7 +323,9 @@ def pdf_to_word_exact(paths, progress, **_):
         progress(T("Word'e (birebir düzen) çevriliyor: {0}", p.name))
         out = unique_path(p.parent, p.stem, ".docx")
         from .actions import _carry_marks, _collect_notes
+        from .actions import unrotate
         with open_pdf(p) as d:            # also the password/corruption check
+            unrotate(d)
             notes = _collect_notes(d)
         fixed_layout.convert(p, out, progress)
         # pen marks are already in the page backgrounds here; the notes' text becomes comments

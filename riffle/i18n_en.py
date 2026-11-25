@@ -477,4 +477,6 @@ CATALOG = {
     'ℹ {0}: bölmeye gerek kalmadı.': 'ℹ {0}: no need to split.',
     'ℹ {0}: {1} parça → {2}': 'ℹ {0}: {1} parts → {2}',
     ' ({0} parçada tek sayfa sınırı aşıyor).': ' (in {0} parts a single page is over the limit).',
+    "sunum": 'slides',
+    "el yazılı not": 'handwritten notes',
 }

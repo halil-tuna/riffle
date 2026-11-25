@@ -24,8 +24,8 @@ Your files never leave your computer.
   Word comments on the text they refer to. Slides and two-column papers get an
   exact-layout mode with editable text boxes.
   Measured with a round-trip benchmark (PDF → Word → PDF, text + visual + page score):
-  **97.5 / 100** average over a mixed corpus of reports, articles, slides, tables, scanned pages and
-  handwritten notes.
+  **97.9 / 100** average over a mixed corpus of reports, articles, slides, tables, scanned pages and
+  handwritten notes, and **96.8** on a second set of documents it was never tuned on.
 - **Scanned documents** — Tesseract OCR with automatic cleanup for shadowed, faded or phone-photographed
   pages, deskew, table reconstruction, and font size / bold detection so the Word output looks like the scan.
 - **Page organizer** — thumbnails of PDFs, images (incl. iPhone HEIC) and Office files together; drag to

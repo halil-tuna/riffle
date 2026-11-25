@@ -359,18 +359,27 @@ def pdf_to_word(paths: list[Path], progress: Progress, mode: str = "auto", **_) 
     for p in paths:
         progress(T("Word'e çevriliyor: {0} (uzun sürebilir)", p.name))
         out = unique_path(p.parent, p.stem, ".docx")
+        from . import fixed_layout, reflow
+        kind = None
         with open_pdf(p) as d:
+            unrotate(d)                     # same coordinates as the prepared copy
             ink = _collect_ink(d)
             notes = _collect_notes(d)
-        with tempfile.TemporaryDirectory(prefix="riffle_w_") as tmp:
-            src = _prepare_pdf(p, Path(tmp) / "kaynak.pdf", progress)
-            from . import fixed_layout, reflow
-            kind = None
+            # Decide the layout BEFORE OCR: in the exact layout a page that is a picture (a scanned
+            # book page on a slide) must stay a picture; OCR would swap it for its text alone
+            # (pictures lost, misreadings added) and take minutes on a long deck.
             if mode != "flow":
-                with pymupdf.open(src) as probe:
-                    if fixed_layout.looks_like_slides(probe):
-                        kind = "sunum"
-                    elif reflow.is_two_column(probe):
+                if fixed_layout.looks_like_slides(d):
+                    kind = T("sunum")
+                elif fixed_layout.looks_handwritten(d):
+                    kind = T("el yazılı not")
+                elif reflow.is_two_column(d):
+                    kind = T("iki sütunlu belge")
+        with tempfile.TemporaryDirectory(prefix="riffle_w_") as tmp:
+            src = _prepare_pdf(p, Path(tmp) / "kaynak.pdf", progress, ocr=kind is None)
+            if mode != "flow" and kind is None:
+                with pymupdf.open(src) as probe:     # a scanned paper shows its columns after OCR
+                    if reflow.is_two_column(probe):
                         kind = T("iki sütunlu belge")
             if kind:
                 # Slides and two-column papers: lines/pages shift in flowing text, use the exact layout
@@ -842,29 +851,46 @@ def _run_cancellable(cmd, timeout: float, flags: int = 0):
                 return subprocess.CompletedProcess(cmd, -9, out, err)
 
 
-def _prepare_pdf(src: Path, dst: Path, progress: Progress) -> Path:
+def unrotate(doc) -> int:
+    """Turns every rotated page (/Rotate 90/180/270) into an upright page with the same look:
+    the rotation moves into the content. Converters that read page coordinates (pdf2docx, the
+    exact layout) then see what the reader sees. Returns how many pages were turned."""
+    n = 0
+    for page in doc:
+        if page.rotation:
+            page.remove_rotation()
+            n += 1
+    return n
+
+
+def _prepare_pdf(src: Path, dst: Path, progress: Progress, ocr: bool = True) -> Path:
     """Prepares the PDF before handing it to pdf2docx. Returns the original if nothing changes.
 
     - Removes handwritten (Ink) annotations: pdf2docx makes them free shapes that break the
       text layout. pdf_to_word puts them back afterwards as floating pictures (_add_ink).
       Highlights are kept.
+    - Bakes page rotation (/Rotate) into the content (unrotate): slides saved as portrait pages
+      shown turned by 90° lost their pictures and placed text wrongly.
     - Turns pages without text (scanned, handwritten, drawings) into page images:
       pdf2docx skips vector lines, otherwise the page comes out empty or incomplete.
+      With ocr=False (exact layout) such pages stay as they are: the exact layout keeps the
+      whole page as its background picture.
     """
     doc = open_pdf(src)
     try:
+        rotated = unrotate(doc)
         ink = 0
         for page in doc:
             for annot in list(page.annots()):
                 if annot.type[0] == pymupdf.PDF_ANNOT_INK:
                     page.delete_annot(annot)
                     ink += 1
-        textless = {i for i, page in enumerate(doc) if len(page.get_text().strip()) < 10}
+        textless = {i for i, page in enumerate(doc) if len(page.get_text().strip()) < 10} if ocr else set()
         # Cropped pages (cut from a larger canvas, e.g. magazine PDFs): pdf2docx
         # ignores the crop offset, images end up 'outside the page' and get dropped.
         cropped = {i for i, page in enumerate(doc)
                    if page.cropbox != page.mediabox or page.mediabox.x0 or page.mediabox.y0}
-        if not ink and not textless and not cropped:
+        if not ink and not textless and not cropped and not rotated:
             return src
         # Pages without text: OCR if Tesseract is available → editable text if it is mostly text
         ocr_words, ocr_used = {}, set()

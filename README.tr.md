@@ -201,6 +201,9 @@ Program belgenin türünü kendisi anlar:
   Vurgulamalar ve kalem işaretleri (tik, altını çizme) de aktarılır: kalem işaretleri metni itmeyen,
   işaretlediği paragrafla birlikte kayan resimler olur. PDF'e yazılmış notlar (vurgunun içindeki yorum, yapışkan
   not, cevaplar) ilgili metne bağlı gerçek Word yorumları olur: kenarda balon, Word'de cevaplanır/çözüldü yapılır.
+- **Üstüne kalemle yazılmış sayfalar** (iPad/GoodNotes notları, çözülmüş sınav) ve **döndürülmüş sayfalar**
+  (dikey kaydedilip yatay gösterilen slaytlar) birebir düzende, oldukları gibi aktarılır; iPad'in el yazısından
+  çıkardığı görünmez metin Word'e taşınmaz.
 - **Sunumlar ve iki sütunlu makaleler**: *birebir düzen* — arka plan resim, yazılar yerinde
   düzenlenebilir kutular; satırlar ve sayfa sonları orijinalle aynı kalır. Akan metin istersen
   **PDF → Word (akan metin)**, her belgeyi birebir istersen **PDF → Word (birebir düzen)**.
@@ -210,12 +213,12 @@ Program belgenin türünü kendisi anlar:
 
 ## Kurulum — Windows 11 (kolay yol: kurulum dosyası)
 
-GitHub'daki **Releases** sayfasından `Riffle-1.0.9-setup.exe`'yi indir, çalıştır (yönetici yetkisi
+GitHub'daki **Releases** sayfasından `Riffle-1.1.0-setup.exe`'yi indir, çalıştır (yönetici yetkisi
 istemez). Sağ tık menüsü kendiliğinden eklenir; kaldırınca menü de silinir. Kurulumun son ekranındaki
 bağlantılardan isteğe bağlı bileşenleri kur: LibreOffice (Office → PDF), Tesseract (OCR, *Turkish*'i işaretle),
 Ghostscript (PDF/A).
 
-Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v1.0.9` gibi bir etiket (tag) gönderince
+Kurulum dosyası GitHub Actions'ta otomatik üretilir: depoya `v1.1.0` gibi bir etiket (tag) gönderince
 `.github/workflows/windows-exe.yml` Windows'ta testleri çalıştırır, PyInstaller ile paketler, paketi gerçek bir
 PDF'le dener, Inno Setup ile `…-setup.exe` yapar ve sürüme ekler. Elle de çalıştırılabilir
 (Actions → *Windows installer* → *Run workflow*; çıktı *Artifacts* altında).

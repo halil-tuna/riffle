@@ -84,8 +84,18 @@ def docx_to_pdf(docx: Path, outdir: Path) -> Path:
 
 # ---------------------------------------------------------------- metrics
 
-def words(doc) -> list[str]:
-    text = " ".join(p.get_text() for p in doc)
+def words(doc, visible_only: bool = False) -> list[str]:
+    if visible_only:
+        # the reader's text: invisible layers (a scan's OCR text, an iPad's handwriting-recognition
+        # garbage over the strokes) are not part of what the page says
+        lines = []
+        for p in doc:
+            for b in p.get_text("dict")["blocks"]:
+                for ln in b.get("lines", []):
+                    lines.append("".join(s["text"] for s in ln["spans"] if s.get("alpha", 255) != 0))
+        text = "\n".join(lines)
+    else:
+        text = " ".join(p.get_text() for p in doc)
     text = re.sub(r"-\s*\n\s*", "", text)          # line-end hyphenation
     return re.findall(r"\w+", text.lower())
 
@@ -191,7 +201,7 @@ def run_one(args) -> dict:
     # Scanned documents have no text in the original: if '<name>.truth.txt' exists, that is the correct text
     truth = pdf.with_name(pdf.stem + ".truth.txt")
     ref = re.findall(r"\w+", re.sub(r"-\s*\n\s*", "", truth.read_text(encoding="utf-8")).lower()) \
-        if truth.exists() else words(a)
+        if truth.exists() else words(a, visible_only=True)
     ts = text_score(ref, words(b))
     res["text"] = None if ts is None else round(ts, 1)
 

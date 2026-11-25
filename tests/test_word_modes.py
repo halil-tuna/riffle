@@ -401,3 +401,54 @@ def test_exact_layout_turned_text_becomes_vertical_text_box(tmp_path):
     assert 'vert="vert"' in box_of("Third Edition")
     assert 'vert="vert270"' in box_of("Sayfa kenar")
     assert 'vert="horz"' in box_of("MECHANICS")
+
+
+def test_rotated_pages_are_turned_upright(tmp_path):
+    """A slide saved as a portrait page shown turned by 90° (/Rotate 90): the exact layout used to
+    lose its pictures and place text wrongly. Pages are made upright first, look unchanged."""
+    from riffle.actions import unrotate
+    src = tmp_path / "donuk.pdf"
+    d = pymupdf.open()
+    for k in range(2):
+        p = d.new_page(width=595, height=842)
+        p.set_rotation(90)                                   # shown as a 842×595 landscape slide
+        p.insert_text((60, 80), f"Slayt {k + 1}: Basinc ve yogunluk", fontsize=24)
+        p.draw_rect(pymupdf.Rect(60, 200, 300, 400), color=(1, 0, 0), fill=(1, 0.8, 0.8))
+    d.save(src)
+    with pymupdf.open(src) as chk:
+        before = chk[0].get_pixmap(dpi=30).samples
+        assert unrotate(chk) == 2 and chk[0].rotation == 0
+        assert chk[0].rect.width > chk[0].rect.height
+        assert chk[0].get_pixmap(dpi=30).samples == before        # looks the same
+    out = pdf_to_word([src], noop)[0]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    w, h = re.search(r'<w:pgSz w:w="(\d+)" w:h="(\d+)"', xml).groups()
+    assert int(w) > int(h)                                        # landscape page in Word
+    assert "Basinc" in xml
+
+
+def test_pen_heavy_pages_go_exact_and_hidden_text_is_dropped(tmp_path):
+    """Pages written over with a pen (hundreds of curved strokes, like an iPad export) go to the
+    exact layout; an invisible handwriting-recognition layer doesn't become visible text."""
+    import math
+    src = tmp_path / "ipad.pdf"
+    d = pymupdf.open()
+    for k in range(2):
+        p = d.new_page(width=595, height=842)
+        _text(p, (60, 80), "Question 1) Analysis of a buck converter.", 14)
+        sh = p.new_shape()
+        for i in range(320):                                 # handwriting: one curved path per stroke
+            x, y = 60 + (i % 20) * 24, 140 + (i // 20) * 38
+            sh.draw_bezier((x, y), (x + 6, y - 10), (x + 12, y + 10), (x + 18 + math.sin(i), y))
+            sh.finish(color=(0, 0, 0.6), width=1)
+        sh.commit()
+        p.insert_text((80, 200), "음 ㄻ 断 D = 若", fontsize=12, render_mode=3, fontname="china-s")
+    d.save(src)
+    with pymupdf.open(src) as chk:
+        from riffle import fixed_layout
+        assert fixed_layout.looks_handwritten(chk)
+    msgs = []
+    out = pdf_to_word([src], msgs.append)[0]
+    assert any("el yazılı" in m or "handwritten notes" in m for m in msgs)
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert "buck converter" in xml and "断" not in xml and "若" not in xml

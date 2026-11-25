@@ -69,6 +69,10 @@ def _spans(ln, cmap):
     spans = []
     prev_font = None
     for s in ln["spans"]:
+        if s.get("alpha", 255) == 0:
+            # invisible text: a handwriting-recognition layer (iPad: '음 ㄻ 断 …' over the strokes)
+            # or a scan's OCR layer. As a text box it would show up; the page picture already does.
+            continue
         fm = (cmap or {}).get(s["font"].split("+", 1)[-1])
         raw = s["text"]
         _fix_chars_raw(s, fm)            # lost symbols like μ, ﬁ/ﬂ → fi/fl
@@ -275,6 +279,8 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None, name: str 
     _ids["n"] = 0
     name = name or pdf_path.name
     doc = pymupdf.open(pdf_path)
+    from .actions import unrotate
+    unrotate(doc)          # a page shown turned by 90° (portrait page + /Rotate) → upright page
     from .textfix import build_char_map
     cmap = build_char_map(doc)
     media: list[tuple[str, bytes]] = []
@@ -341,6 +347,24 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None, name: str 
         z.writestr("word/styles.xml", styles)
         for rid, data in media:
             z.writestr(f"word/media/{rid}.jpeg", data)
+
+
+def looks_handwritten(doc, sample: int = 10) -> bool:
+    """Notes written over a document with a pen (iPad/GoodNotes/Notability exports, a solved exam):
+    the handwriting is hundreds of curved vector strokes per page. Flowing text can't hold them
+    (strokes lose their place, pages pile up); the exact layout keeps them in the page picture.
+    Measured: such pages 590-1300 curved paths, ordinary documents and slides 0-60."""
+    n = min(len(doc), sample)
+    if not n:
+        return False
+    heavy = 0
+    for i in range(n):
+        try:
+            curves = sum(1 for d in doc[i].get_drawings() if any(it[0] == "c" for it in d["items"]))
+        except Exception:
+            continue
+        heavy += curves >= 250
+    return heavy / n >= 0.5
 
 
 def looks_like_slides(doc) -> bool:
