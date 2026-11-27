@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pytest
+      - run: pip install --prefer-binary -r requirements.txt pytest
       - run: python -m pytest -q tests --ignore=tests/test_ui.py
 
   build:
@@ -33,7 +33,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Dependencies
-        run: pip install -r requirements.txt pyinstaller
+        run: pip install --prefer-binary -r requirements.txt pyinstaller   # a brand-new release may not have Windows wheels yet
       - name: Package (PyInstaller)
         run: python packaging/build_exe.py
       - name: Smoke-test the package
