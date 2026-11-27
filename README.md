@@ -31,7 +31,7 @@ Your files never leave your computer.
 - **Page organizer** — thumbnails of PDFs, images (incl. iPhone HEIC) and Office files together; drag to
   reorder, rotate, delete, duplicate, insert blanks, split into several PDFs, drop files in from Explorer.
 - **Merge anything into one PDF or one Word document** — pick *Result: PDF | Word* in the merge order window.
-  As Word, PDFs go through Riffle's own PDF → Word, slides and sheets through PDF, images become pages, and each
+  As Word, PDFs go through Riffle's exact-layout PDF → Word (every page as it looks, no OCR), slides and sheets through PDF, images become pages, and each
   file starts on a new page with its own page size and orientation (landscape slides stay landscape).
 - **Sign / stamp** — draw your signature once or photograph it on paper (background removed), add text,
   dates and logos, apply to every page.

@@ -15,7 +15,7 @@ PDF, görsel (iPhone HEIC dahil) ve Word/Excel/PowerPoint dosyalarını **birlik
 Birden çok dosyada önce **küçük sıralama penceresi** anında açılır (sayfalar yüklenmez): sırayı ayarla,
 **Birleştir** de — bitti. Sonuç **PDF** (varsayılan) ya da **Word** olabilir: sıralama penceresindeki
 *Sonuç: PDF | Word* seçimi (son seçimin hatırlanır). Word'de her dosya önce Word'e çevrilir — PDF'ler Riffle'ın
-kendi PDF → Word çevirisiyle (slaytlar ve iki sütunlu makaleler birebir düzende), PowerPoint/Excel PDF üzerinden,
+birebir düzen çevirisiyle (her sayfa göründüğü gibi; OCR yok, hızlı), PowerPoint/Excel PDF üzerinden,
 .doc/.odt/.rtf LibreOffice ile, görseller sayfaya oturtulmuş resim olarak — sonra tek `…_birlesik.docx` olur;
 her dosya yeni sayfada ve **kendi sayfa boyutu/yönüyle** başlar (yatay slayt yatay kalır), ara dosya bırakılmaz.
 Sayfa sayfa iş gerekiyorsa **Sayfa sayfa düzenle…** ile düzenleyiciye geç

@@ -206,7 +206,8 @@ def merge_to_word(paths: list[Path], progress: Progress, ordered: bool = False, 
     """PDF, Word, PowerPoint, Excel and image files → ONE Word document, in the given order.
 
     Every file is first made a .docx in a temporary folder (nothing is left next to the sources): PDFs with
-    Riffle's own PDF → Word (slides and two-column papers keep their layout), slides and sheets through PDF,
+    Riffle's PDF → Word in exact layout (no OCR — Halil: "the editable boxes are not that important"), slides
+    and sheets through PDF,
     .doc/.odt/.rtf with LibreOffice, images as a page with the picture. Then they are joined; each file starts
     on a new page and keeps its own page size and orientation (a landscape slide stays landscape)."""
     from .actions import sorted_by_name
@@ -280,16 +281,16 @@ def _to_docx_all(paths: list[Path], tmp: Path, progress: Progress) -> tuple[list
 
 
 def _pdf_to_docx(src: Path, original: Path, work: Path, progress: Progress) -> Path:
-    """Riffle's PDF → Word on a copy inside the temporary folder (so nothing appears next to the source);
-    messages name the original file."""
-    from . import actions
+    """Riffle's PDF → Word in EXACT LAYOUT (every page as it looks, never OCR: quick, and scans stay pictures)
+    on a copy inside the temporary folder (so nothing appears next to the source); messages name the original."""
+    from .tools import pdf_to_word_exact
     work.mkdir(parents=True, exist_ok=True)
     copy = work / (original.stem + ".pdf")
     shutil.copyfile(src, copy)
 
     def prog(m):
         progress(m.replace(copy.name, original.name))
-    outs = actions.pdf_to_word([copy], prog)
+    outs = pdf_to_word_exact([copy], prog)
     if not outs:
         raise ConversionError(T("{0} Word'e çevrilemedi.", original.name))
     return outs[0]

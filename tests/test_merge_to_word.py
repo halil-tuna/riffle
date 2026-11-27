@@ -75,8 +75,29 @@ def test_pdf_word_image_into_one_docx(work):
     assert TR_TEXT.split()[0] in text
     import docx
     assert len(docx.Document(str(out)).inline_shapes) >= 1             # the photo
-    assert any("sunum algılandı" in m and "2 sunum.pdf" in m for m in msgs)   # messages name the real file
+    assert any("birebir düzen" in m and "2 sunum.pdf" in m for m in msgs)    # exact layout; the real file name
+    assert not any("OCR" in m or "metin tanıma" in m.lower() for m in msgs)     # never OCR here
     assert any(m.startswith("ℹ 4 dosya tek Word belgesinde") for m in msgs)
+
+
+def test_pdfs_never_go_through_ocr(work, scanned, monkeypatch):
+    """Merging as Word uses the exact layout for PDFs: a scanned page stays a picture, OCR is never started
+    (the automatic PDF → Word would OCR this scan: see the control below)."""
+    from riffle import actions, ocr
+    calls = []
+
+    def spy(*a, **k):
+        calls.append(1)
+        raise AssertionError("OCR started")
+    monkeypatch.setattr(ocr, "ocr_pages", spy)
+    out = officetools.merge_to_word([scanned, _docx(work / "b.docx")], noop, ordered=True)[0]
+    assert calls == [] and out.exists()
+    import docx
+    assert len(docx.Document(str(out)).inline_shapes) + len(
+        [e for e in docx.Document(str(out)).element.body.iter() if e.tag.endswith("}anchor")]) >= 1  # the scan
+    with pytest.raises(Exception):                     # control: the automatic path does go to OCR here
+        actions.pdf_to_word([scanned], noop)
+    assert calls == [1]
 
 
 def test_order_is_kept(work):
