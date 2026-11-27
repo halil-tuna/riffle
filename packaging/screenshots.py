@@ -126,7 +126,11 @@ def _sample_history(work: Path, cfg: Path, s: dict, lang: str) -> None:
 
         def out(name):
             p = work / name
-            p.write_bytes(b"sample")
+            if name.endswith(".pdf"):                     # a real PDF, so the icon view shows a preview
+                import shutil
+                shutil.copy(s["Rapor.pdf"], p)
+            else:
+                p.write_bytes(b"sample")
             return p
         rep, art, notes = s["Rapor.pdf"], s["Makale.pdf"], s["Ders notu.pdf"]
         history.record("compress", [art], [out(("Article" if en else "Makale") + " (1).pdf")],
@@ -152,6 +156,22 @@ def _select_row(win: str) -> None:
     subprocess.run(["xdotool", "windowfocus", "--sync", win], capture_output=True)
     subprocess.run(["xdotool", "mousemove", "--window", win, "400", "178", "click", "1"], capture_output=True)
     time.sleep(0.8)
+
+
+def _set_view(cfg: Path, view: str) -> None:
+    import json
+    f = cfg / "riffle" / "ayarlar.json"
+    data = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    data["history_view"] = view
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _select_card(win: str) -> None:
+    """Selects the first card of the icon view."""
+    subprocess.run(["xdotool", "windowfocus", "--sync", win], capture_output=True)
+    subprocess.run(["xdotool", "mousemove", "--window", win, "110", "230", "click", "1"], capture_output=True)
+    time.sleep(1.0)
 
 
 def _window(part: str, timeout: float = 25) -> str | None:
@@ -207,6 +227,9 @@ def capture(outdir: Path, dark: bool, lang: str = "tr") -> None:
     scene("form", ["form", str(s["form"])], "Fill in" if en else "Form doldur")
     scene("settings", ["--settings"], "^Riffle$")
     scene("history", ["--app"], "^Riffle$", wait=1.5, before=_select_row)
+    _set_view(Path(env["XDG_CONFIG_HOME"]), "icons")
+    scene("history-icons", ["--app"], "^Riffle$", wait=2.5, before=_select_card)
+    _set_view(Path(env["XDG_CONFIG_HOME"]), "list")
     fresh = work.parent / "cfg-yeni"                       # a first start: the welcome window
     scene("welcome", ["--app"], "^Riffle$", XDG_CONFIG_HOME=str(fresh), RIFFLE_NO_WELCOME="")
 

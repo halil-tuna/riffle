@@ -546,4 +546,6 @@ CATALOG = {
         'You see what you converted and when in the Riffle window. Kept only on this computer, no copies of the '
         'files are made, deleted after {0} days. You can change this later in Settings.',
     'Başla': 'Start',
+    'Simgeler': 'Icons',
+    'Liste': 'List',
 }

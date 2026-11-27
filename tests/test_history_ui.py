@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import ROOT
+from conftest import ROOT, make_text_pdf
 
 import riffle
 from riffle import history, history_ui, settings
@@ -547,3 +547,139 @@ def test_stale_request_ignored(tmp_path):
     i = Instance(tmp_path)
     assert i.acquire() and i.poll() is None
     i.release()
+
+
+# ---------------------------------------------------------------- icon view (stage 3.5)
+
+def _pump(cond, root, timeout=10):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        root.update()
+        if cond():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.fixture
+def icons(tab):
+    from riffle import history_ui as hu
+    tab.view.set("icons")
+    tab._switch_view()
+    tab.root.update()
+    tab.icons.layout()
+    tab.root.update()
+    return tab
+
+
+def _center(view, jid):
+    from types import SimpleNamespace
+    x0, y0, x1, y1 = view.cards[jid]["box"]
+    c = view.canvas
+    return SimpleNamespace(x=(x0 + x1) / 2 - c.canvasx(0), y=(y0 + y1) / 2 - c.canvasy(0), x_root=0, y_root=0)
+
+
+@needs_display
+def test_icon_view_cards(icons):
+    v = icons.icons
+    assert icons.list_frame.winfo_manager() == "" and v.frame.winfo_manager() == "pack"
+    assert set(v.cards) == set(icons.jobs) and len(v.groups) == 3
+    assert [label for label, _ in v.groups][:2] == ["Bugün", "Dün"]
+    assert settings.load()["history_view"] == "icons"                    # remembered
+    texts = [v.canvas.itemcget(i, "text") for i in v.canvas.find_all() if v.canvas.type(i) == "text"]
+    assert "Birlesik.pdf" in texts and "rapor (1).docx" in texts and "tarama_ocr.pdf" in texts
+    assert v.cards[icons.ids["gone"]]["present"] is False
+
+
+@needs_display
+def test_icon_view_previews_arrive(icons):
+    v = icons.icons
+    pdf_card = icons.ids["merge"]                    # output Birlesik.pdf: a real preview is made
+    icon_before = v.canvas.itemcget(v.cards[pdf_card]["img"], "image")
+
+    def ready():
+        return v.canvas.itemcget(v.cards[pdf_card]["img"], "image") != icon_before
+    # the sample "PDF" is not a real PDF (b"x"): make it one so there is something to draw
+    out = Path(icons.jobs[pdf_card]["outputs"][0])
+    make_text_pdf(out, pages=1)
+    v.images.clear()
+    v.layout()
+    assert _pump(ready, icons.root)
+    assert len(v.images) >= 1 and not v.busy
+
+
+@needs_display
+def test_icon_view_select_open_keys(icons, monkeypatch):
+    v = icons.icons
+    opened = []
+    monkeypatch.setattr(history_ui, "open_path", opened.append)
+    jid = icons.ids["word"]
+    v._click(_center(v, jid))
+    icons.root.update()
+    assert icons.selected_id() == jid and v.sel == jid
+    assert "rapor (1).docx" in icons.detail.get("1.0", "end")
+    assert v.canvas.itemcget(v.cards[jid]["rect"], "outline") != ""
+    assert v._double(_center(v, jid)) == "break" and opened == [icons.jobs[jid]["outputs"][0]]
+    v._move(-1)                                                          # ← : the card before (merge)
+    assert icons.selected_id() == v.order[v.order.index(jid) - 1]
+    v._move(1)
+    assert icons.selected_id() == jid
+    from types import SimpleNamespace
+    assert v._at(SimpleNamespace(x=-5, y=-5)) is None                   # empty space
+
+
+@needs_display
+def test_icon_view_remove_and_back_to_list(icons):
+    v = icons.icons
+    jid = icons.ids["merge"]
+    v.choose(jid)
+    icons.remove_selected()
+    icons.root.update()
+    assert jid not in v.cards and icons.selected_id() is not None
+    keep = icons.selected_id()
+    icons.view.set("list")
+    icons._switch_view()
+    assert icons.list_frame.winfo_manager() == "pack" and icons.tree.selection() == (f"j{keep}",)
+
+
+@needs_display
+def test_icon_view_window_reopens_in_icons(cfg, tmp_path):
+    from tkinter import ttk
+    from riffle import theme
+    _set(history_view="icons")
+    _fill(tmp_path / "d")
+    root = tk.Tk()
+    try:
+        t = history_ui.build_tab(ttk.Notebook(root), root, theme.setup(root))
+        assert t.view.get() == "icons"
+    finally:
+        root.destroy()
+
+
+@needs_display
+def test_icon_view_nothing_on_disk(icons, cfg):
+    v = icons.icons
+    v.layout()
+    _pump(lambda: not v.busy and not v.waiting, icons.root)
+    names = {p.name for p in (cfg / "riffle").iterdir()}
+    assert not {n for n in names if n.lower().endswith((".png", ".jpg", ".bmp", ".cache"))}, names
+
+
+@needs_display
+def test_settings_save_keeps_view(cfg, monkeypatch):
+    """Saving General must not undo the view chosen in the History tab meanwhile."""
+    from tkinter import ttk
+    real_tk = tk.Tk
+
+    class Probe(real_tk):
+        def mainloop(self, n=0):
+            def act():
+                _set(history_view="icons")                     # as the History tab would
+                self.event_generate("<Control-s>")
+                self.update()
+                self.destroy()
+            self.after(300, act)
+            super().mainloop(n)
+    monkeypatch.setattr(tk, "Tk", Probe)
+    settings.run(tab="general")
+    assert settings.load()["history_view"] == "icons"

@@ -163,6 +163,11 @@ Riffle yaptığın işlemleri hatırlar: ne zaman neyi dönüştürdün, çıkt�
 ![Geçmiş](docs/screenshots/tr/history.png)
 
 - Güne göre liste (Bugün, Dün, tarih); dosya adıyla arama, işleme ve duruma (✓ ⚠ ✗ ⊘) göre süzme.
+- **Liste** ya da **Simgeler** görünümü (seçim hatırlanır): simgelerde her işlem Gezgin'deki gibi önizlemeyle
+  görünür — PDF'in ilk sayfası, resmin kendisi, Word/Excel/PowerPoint için Windows'un kendi önizlemesi; önizleme
+  yoksa türüne göre renkli simge. Önizlemeler yalnızca pencere açıkken bellekte tutulur, diske yazılmaz.
+
+![Geçmiş — simgeler](docs/screenshots/tr/history-icons.png)
 - **Çift tık** çıktı dosyasını açar · *Klasörde göster* · **Tekrar dönüştür** (aynı araç, aynı dosyalar; sayfa
   aralığı gibi önceki cevaplar hazır gelir, şifre her seferinde yeniden sorulur) · *Listeden kaldır*
   (dosyaya dokunmaz) · *Geçmişi temizle*.
@@ -308,6 +313,7 @@ riffle/settings.py      Riffle penceresi: ayarlar, sık kullanılanlar, çıktı
 riffle/history.py       işlem geçmişi (yerel SQLite; korumalı, dönüştürmeyi asla bozmaz)
 riffle/history_ui.py    Geçmiş sekmesi
 riffle/welcome.py       ilk kullanım penceresi
+riffle/thumbs.py        Geçmiş simge görünümünün önizlemeleri (PDF sayfası, resim, Windows önizlemesi; sadece bellek)
 riffle/single_instance.py  aynı anda tek Riffle penceresi
 riffle/officetools.py   Office küçültme, Word birleştirme, CSV → Excel, not çıktısı, Office resimleri
 riffle/imagetools.py    görseldeki yazı (OCR), hedef boyut, PNG, döndürme

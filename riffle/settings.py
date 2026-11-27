@@ -27,6 +27,7 @@ DEFAULTS = {
     "history": True,          # job history (only on this computer; see history.py)
     "history_days": 90,       # history records older than this are deleted
     "first_run_done": False,  # the welcome window was shown once
+    "history_view": "list",   # History tab: list | icons
 }
 FAV_AUTO = 3
 FAV_MIN_USES = 3
@@ -374,6 +375,7 @@ def run(paths=None, progress=print, tab: str | None = None, **_) -> list:
         s["language"] = lang_var.get()
         s["history"] = hist_on.get()
         s["history_days"] = day_choices.get(days_var.get(), 90)
+        s["history_view"] = load().get("history_view", "list")   # chosen in the History tab meanwhile
         if s["output"] == "folder" and not Path(s["output_dir"]).is_dir():
             messagebox.showerror(APP_NAME, T("Seçilen çıktı klasörü bulunamadı."), parent=root)
             return

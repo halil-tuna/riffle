@@ -49,7 +49,8 @@ Your files never leave your computer.
   cancelled without leaving half-written files.
 - **History** — Riffle remembers what you converted, when, and where the output went (*Riffle* in the Start
   menu → History). Search, filter, double-click to open the output, *Show in folder*, *Convert again* (same
-  tool, same files). Kept only on this computer, no copies of your files, deleted after 90 days; asked once on
+  tool, same files). List or icon view — icons show a preview like File Explorer (first PDF page, the image,
+  Windows' own preview for Office files), kept in memory only. Kept only on this computer, no copies of your files, deleted after 90 days; asked once on
   first use, can be turned off or cleared in Settings. Passwords are never stored.
 - **Native look** — Windows 11 style (Sun Valley theme), follows the system light/dark mode, dark title bar.
 - **Update notice** — once a week Riffle asks GitHub for the latest version number (nothing else is sent) and
@@ -60,7 +61,8 @@ Your files never leave your computer.
 | ![Merge order](docs/screenshots/en/order.png) | ![Done](docs/screenshots/en/done.png) |
 | ![Signature and stamps](docs/screenshots/en/stamp.png) | ![Folder search](docs/screenshots/en/search.png) |
 | ![Settings, dark mode](docs/screenshots/en/settings-dark.png) | ![Organizer, dark mode](docs/screenshots/en/organizer-dark.png) |
-| ![History](docs/screenshots/en/history.png) | ![First start](docs/screenshots/en/welcome.png) |
+| ![History](docs/screenshots/en/history.png) | ![History, icon view](docs/screenshots/en/history-icons.png) |
+| ![First start](docs/screenshots/en/welcome.png) | |
 
 ## Install
 
@@ -125,6 +127,7 @@ riffle/forms.py         form filling        riffle/search.py   folder search
 riffle/settings.py      the Riffle window: settings, favourites, output folder, appearance
 riffle/history*.py      job history (local SQLite, guarded so it can never break a conversion) + History tab
 riffle/welcome.py       first-run window     riffle/single_instance.py   one Riffle window at a time
+riffle/thumbs.py        previews for the History icon view (PDF page, image, Windows shell thumbnail; memory only)
 riffle/i18n.py          languages: T("…") wrapper, system-language detection, setting
 riffle/i18n_en.py       English catalogue (source strings are Turkish; tests/i18n_scan.py lists missing ones)
 riffle/theme.py         shared look: Windows 11 theme, light/dark, colours, icon

@@ -6,9 +6,13 @@ Reading the history (history.query) takes milliseconds, so it is done on the win
 
 from __future__ import annotations
 
+import math
 import os
+import queue
 import subprocess
 import sys
+import threading
+from collections import OrderedDict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -163,27 +167,37 @@ class HistoryTab:
         bar.pack(fill="x")
         ttk.Label(bar, text=T("Ara:")).pack(side="left")
         self.search = tk.StringVar()
-        self.search_entry = ttk.Entry(bar, textvariable=self.search, width=22)
+        self.search_entry = ttk.Entry(bar, textvariable=self.search, width=16)
         self.search_entry.pack(side="left", padx=(6, 14))
         self.search.trace_add("write", lambda *_: self._later())
         ttk.Label(bar, text=T("İşlem:")).pack(side="left")
         self.action = tk.StringVar(value=T("Tümü"))
-        self.action_box = ttk.Combobox(bar, textvariable=self.action, state="readonly", width=20)
+        self.action_box = ttk.Combobox(bar, textvariable=self.action, state="readonly", width=17)
         self.action_box.pack(side="left", padx=(6, 14))
         self.action_box.bind("<<ComboboxSelected>>", lambda e: self.refresh())
         ttk.Label(bar, text=T("Durum:")).pack(side="left")
         self.status = tk.StringVar(value=T("Tümü"))
-        self.status_box = ttk.Combobox(bar, textvariable=self.status, state="readonly", width=12,
+        self.status_box = ttk.Combobox(bar, textvariable=self.status, state="readonly", width=10,
                                        values=[T("Tümü")] + list(_status_names().values()))
         self.status_box.pack(side="left", padx=(6, 0))
         self.status_box.bind("<<ComboboxSelected>>", lambda e: self.refresh())
+        self.view = tk.StringVar(value=_saved_view())
+        for val, text in (("icons", T("Simgeler")), ("list", T("Liste"))):     # (packed right to left)
+            try:                                                                # selected = accent (sv-ttk)
+                rb = ttk.Radiobutton(bar, text=text, value=val, variable=self.view, style="Toggle.TButton",
+                                     command=self._switch_view)
+            except tk.TclError:
+                rb = ttk.Radiobutton(bar, text=text, value=val, variable=self.view, style="Toolbutton",
+                                     command=self._switch_view)
+            rb.pack(side="right", padx=(4, 0))
 
         self.banner = ttk.Label(f, style="Muted.TLabel")       # shown only when there is something to say
 
         mid = self.mid = ttk.Frame(f)
         mid.pack(fill="both", expand=True, pady=(10, 8))
         cols = ("time", "action", "files", "status", "duration")
-        self.tree = ttk.Treeview(mid, columns=cols, show="tree headings", selectmode="browse")
+        self.list_frame = ttk.Frame(mid)
+        self.tree = ttk.Treeview(self.list_frame, columns=cols, show="tree headings", selectmode="browse")
         self.tree.column("#0", width=16, minwidth=16, stretch=False)
         for c, title, w, anchor, stretch in (("time", T("Saat"), 60, "w", False),
                                              ("action", T("İşlem"), 240, "w", False),
@@ -192,7 +206,7 @@ class HistoryTab:
                                              ("duration", T("Süre"), 92, "e", False)):
             self.tree.heading(c, text=title, anchor=anchor)
             self.tree.column(c, width=w, minwidth=30, anchor=anchor, stretch=stretch)
-        sb = ttk.Scrollbar(mid, orient="vertical", command=self.tree.yview)
+        sb = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
@@ -206,6 +220,8 @@ class HistoryTab:
         except Exception:
             pass
         self.tree.tag_configure("missing", foreground=pal.muted)
+        self.icons = IconView(self, mid)
+        self._show_view()
         self.empty = ttk.Label(mid, style="Muted.TLabel", justify="center", wraplength=460)
 
         self.detail = tk.Text(f, height=7, wrap="word", cursor="arrow")
@@ -343,6 +359,9 @@ class HistoryTab:
         if keep is not None and self.tree.exists(f"j{keep}"):
             self.tree.selection_set(f"j{keep}")
             self.tree.see(f"j{keep}")
+        self.icons.set_jobs([(self.tree.item(g, "values")[1], [self.jobs[int(c[1:])] for c in self.tree.get_children(g)])
+                             for g in self.tree.get_children()])
+        self.empty.lift()
         self.show_details()
 
     # ---------------------------------------------------------- selection
@@ -369,8 +388,30 @@ class HistoryTab:
         self.tree.focus(f"j{job_id}")
         self.show_details()
 
+    def _show_view(self) -> None:
+        if self.view.get() == "icons":
+            self.list_frame.pack_forget()
+            self.icons.frame.pack(fill="both", expand=True)
+        else:
+            self.icons.frame.pack_forget()
+            self.list_frame.pack(fill="both", expand=True)
+
+    def _switch_view(self) -> None:
+        self._show_view()
+        self.icons.layout()
+        jid = self.selected_id()
+        if jid is not None:
+            self.icons.see(jid)
+            if self.view.get() == "list":
+                self.tree.see(f"j{jid}")
+        _save_view(self.view.get())
+
     def show_details(self) -> None:
         j = self.selected()
+        try:
+            self.icons.highlight(j["id"] if j else None)
+        except Exception:
+            pass
         d = self.detail
         d.configure(state="normal")
         d.delete("1.0", "end")
@@ -499,6 +540,359 @@ class HistoryTab:
         except Exception:
             pass
         self.refresh()
+
+
+def _saved_view() -> str:
+    try:
+        from . import settings
+        v = settings.load().get("history_view", "list")
+        return v if v in ("list", "icons") else "list"
+    except Exception:
+        return "list"
+
+
+def _save_view(view: str) -> None:
+    try:
+        from . import settings
+        s = settings.load()
+        s["history_view"] = view
+        settings.save(s)
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------------ icon view
+
+CARD_W, CARD_H, THUMB, HEAD_H, PAD = 152, 204, 120, 34, 12
+CACHE = 400                      # previews kept in memory (never on disk)
+
+
+class IconView:
+    """Cards with a preview of each job's output, grouped by day, like File Explorer's large icons.
+
+    The selection lives in the (hidden) list's tree, so every button, the details box and the right-click menu
+    work the same in both views. Previews are made on a background thread, only for the cards on screen,
+    and are kept in memory only (thumbs.py)."""
+
+    def __init__(self, tab: HistoryTab, parent):
+        tk, ttk = tab.tk, tab.ttk
+        self.tab, self.pal = tab, tab.pal
+        self.frame = ttk.Frame(parent)
+        self.canvas = tk.Canvas(self.frame, highlightthickness=0, background=self.pal.surface, takefocus=1,
+                                yscrollincrement=CARD_H // 4)
+        self.sb = ttk.Scrollbar(self.frame, orient="vertical", command=self._yview)
+        self.canvas.configure(yscrollcommand=self._yset)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.sb.pack(side="left", fill="y")
+        self.groups: list = []
+        self.order: list[int] = []
+        self.cards: dict[int, dict] = {}
+        self.cols = 1
+        self.sel: int | None = None
+        self.images: OrderedDict = OrderedDict()   # key → PhotoImage (memory only)
+        self.icons: dict = {}                      # (extension, present) → PhotoImage of the drawn type icon
+        self.waiting: list = []                    # [(key, path)] still to make, the visible ones
+        self.busy: set = set()
+        self.lock = threading.Lock()
+        self.done: queue.Queue = queue.Queue()
+        self.worker: threading.Thread | None = None
+        self._layout_after = None
+        self._poll_after = None
+        try:
+            from tkinter import font
+            base = font.nametofont("SunValleyBodyFont") if "SunValleyBodyFont" in font.names(tab.root) \
+                else font.nametofont("TkDefaultFont")
+            self.f_name = base.copy()
+            self.f_meta = base.copy()
+            size = int(base.cget("size"))                   # negative = pixels, positive = points
+            self.f_meta.configure(size=size + 1 if size < 0 else max(7, size - 1))
+            self.f_head = base.copy()
+            self.f_head.configure(weight="bold")
+        except Exception:
+            self.f_name = self.f_meta = self.f_head = None
+        c = self.canvas
+        c.bind("<Configure>", lambda e: self._later_layout())
+        c.bind("<Button-1>", self._click)
+        c.bind("<Double-1>", self._double)
+        c.bind("<Button-3>", self._context)
+        c.bind("<MouseWheel>", self._wheel)
+        c.bind("<Button-4>", self._wheel)
+        c.bind("<Button-5>", self._wheel)
+        c.bind("<Return>", lambda e: self.tab.open_selected())
+        c.bind("<Delete>", lambda e: self.tab.remove_selected())
+        for key, step in (("<Left>", -1), ("<Right>", 1), ("<Up>", "up"), ("<Down>", "down")):
+            c.bind(key, lambda e, s=step: (self._move(s), "break")[1])
+
+    # ---------------------------------------------------------- data and drawing
+
+    def set_jobs(self, groups) -> None:
+        self.groups = groups
+        self.order = [j["id"] for _, jobs in groups for j in jobs]
+        if self.frame.winfo_manager():
+            self.layout()
+
+    def _later_layout(self) -> None:
+        if self._layout_after:
+            self.canvas.after_cancel(self._layout_after)
+        self._layout_after = self.canvas.after(60, self.layout)
+
+    def layout(self) -> None:
+        self._layout_after = None
+        c = self.canvas
+        if not self.frame.winfo_manager():
+            return
+        width = max(c.winfo_width(), CARD_W + 2 * PAD)
+        self.cols = max(1, (width - 2 * PAD) // CARD_W)
+        x0 = PAD
+        c.delete("all")
+        self.cards = {}
+        y = PAD
+        for label, jobs in self.groups:
+            c.create_text(x0 + 4, y + HEAD_H // 2, text=label, anchor="w", font=self.f_head, fill=self.pal.fg)
+            c.create_line(x0 + 4, y + HEAD_H - 4, width - PAD, y + HEAD_H - 4, fill=self.pal.border)
+            y += HEAD_H
+            for i, j in enumerate(jobs):
+                self._card(j, x0 + (i % self.cols) * CARD_W, y + (i // self.cols) * CARD_H)
+            y += math.ceil(len(jobs) / self.cols) * CARD_H + 6
+        c.configure(scrollregion=(0, 0, width, y + PAD))
+        self.highlight(self.sel)
+        self._want_visible()
+
+    def _card(self, job: dict, x: int, y: int) -> None:
+        c, pal, tab = self.canvas, self.pal, self.tab
+        from . import thumbs
+        path, present = thumbs.card_file(job, tab._present_now)
+        tag = f"c{job['id']}"
+        rect = c.create_rectangle(x + 4, y + 4, x + CARD_W - 4, y + CARD_H - 4, fill="", outline="",
+                                  width=2, tags=(tag, "card"))
+        img = c.create_image(x + CARD_W // 2, y + 10 + THUMB // 2, image=self._image_now(path, present),
+                             tags=(tag,))
+        name = Path(path).name if path else "—"
+        if len(name) > 40:
+            name = name[:24] + "…" + name[-14:]
+        c.create_text(x + CARD_W // 2, y + THUMB + 18, text=name, width=CARD_W - 16, anchor="n", justify="center",
+                      font=self.f_name, fill=pal.fg if present else pal.muted, tags=(tag,))
+        t = local_time(job["started_at"])
+        head = (t.strftime("%H:%M") + " · ") if t else ""
+        tail = "  " + STATUS_ICON.get(job["status"], "")
+        meta = head + self._fit(action_label(job["action_id"]), CARD_W - 14, head + tail) + tail
+        c.create_text(x + CARD_W // 2, y + CARD_H - 18, text=meta, anchor="center", font=self.f_meta,
+                      fill=pal.muted, tags=(tag,))
+        self.cards[job["id"]] = {"rect": rect, "img": img, "path": path, "present": present,
+                                 "box": (x, y, x + CARD_W, y + CARD_H)}
+
+    def _fit(self, text: str, width: int, extra: str = "") -> str:
+        """Shortens text with … so that extra + text fits in width pixels (one line)."""
+        f = self.f_meta
+        if f is None:
+            return text if len(text) <= 16 else text[:15] + "…"
+        room = width - f.measure(extra)
+        if f.measure(text) <= room:
+            return text
+        while text and f.measure(text + "…") > room:
+            text = text[:-1]
+        return text.rstrip() + "…"
+
+    def _key(self, path, present):
+        from . import thumbs
+        return (path, thumbs.stamp(path) if present else None, present, self.pal.dark)
+
+    def _image_now(self, path, present):
+        """The finished preview if it is ready, else the file-type icon (drawn at once)."""
+        if path is None:
+            return self._icon("x", False)
+        key = self._key(path, present)
+        if key in self.images:
+            self.images.move_to_end(key)
+            return self.images[key]
+        return self._icon(path, present)
+
+    def _icon(self, path, present):
+        from . import thumbs
+        ext = Path(path).suffix.lower() if not Path(path).is_dir() else "/"
+        k = (ext, present, self.pal.dark)
+        if k not in self.icons:
+            im = thumbs.card_image(path, present, THUMB, self.pal.dark, self.pal.surface)
+            self.icons[k] = self.tab.tk.PhotoImage(master=self.canvas, data=thumbs.to_png(im))
+        return self.icons[k]
+
+    # ---------------------------------------------------------- previews in the background
+
+    def _visible_ids(self) -> list[int]:
+        c = self.canvas
+        top, bottom = c.canvasy(0) - CARD_H, c.canvasy(c.winfo_height()) + CARD_H
+        return [jid for jid in self.order if jid in self.cards
+                and self.cards[jid]["box"][3] >= top and self.cards[jid]["box"][1] <= bottom]
+
+    def _want_visible(self) -> None:
+        from . import thumbs
+        want = []
+        for jid in self._visible_ids():
+            card = self.cards[jid]
+            path, present = card["path"], card["present"]
+            if not path or not present or thumbs.kind(path) == "folder":
+                continue
+            ext = Path(path).suffix.lower().lstrip(".")
+            if sys.platform != "win32" and ext != "pdf" and ext not in thumbs._IMAGE_EXT:
+                continue                                    # nothing better than the type icon here
+            key = self._key(path, present)
+            if key not in self.images and key not in self.busy:
+                want.append((key, path))
+        with self.lock:
+            self.waiting = list(want)                      # only what is on screen now (a copy: the worker pops it)
+        if want and (self.worker is None or not self.worker.is_alive()):
+            self.worker = threading.Thread(target=self._work, daemon=True)
+            self.worker.start()
+        if want and self._poll_after is None:
+            self._poll_after = self.canvas.after(60, self._poll)
+
+    def _work(self) -> None:
+        from . import thumbs
+        thumbs.com_init()
+        while True:
+            with self.lock:
+                if not self.waiting:
+                    return
+                key, path = self.waiting.pop(0)
+                self.busy.add(key)
+            try:
+                content = thumbs.preview(path, THUMB)
+                im = thumbs.card_image(path, True, THUMB, key[3], self.pal.surface, content=content)
+                png = thumbs.to_png(im)
+            except Exception:
+                png = None
+            self.done.put((key, png))
+
+    def _poll(self) -> None:
+        self._poll_after = None
+        try:
+            changed = False
+            while True:
+                try:
+                    key, png = self.done.get_nowait()
+                except queue.Empty:
+                    break
+                self.busy.discard(key)
+                if png is None:
+                    continue
+                self.images[key] = self.tab.tk.PhotoImage(master=self.canvas, data=png)
+                while len(self.images) > CACHE:
+                    self.images.popitem(last=False)
+                changed = True
+            if changed:
+                for jid, card in self.cards.items():
+                    k = self._key(card["path"], card["present"]) if card["path"] else None
+                    if k in self.images:
+                        self.canvas.itemconfigure(card["img"], image=self.images[k])
+            with self.lock:
+                more = bool(self.waiting) or bool(self.busy)
+            if more or (self.worker and self.worker.is_alive()):
+                self._poll_after = self.canvas.after(60, self._poll)
+        except Exception:                                   # the window is closing
+            pass
+
+    # ---------------------------------------------------------- selection and input
+
+    def highlight(self, job_id) -> None:
+        c = self.canvas
+        if self.sel in self.cards:
+            c.itemconfigure(self.cards[self.sel]["rect"], fill="", outline="")
+        self.sel = job_id
+        if job_id in self.cards:
+            c.itemconfigure(self.cards[job_id]["rect"], fill=_mix(self.pal.surface, self.pal.select_bg, 0.18),
+                            outline=self.pal.select_bg)
+
+    def see(self, job_id) -> None:
+        if job_id not in self.cards:
+            return
+        c = self.canvas
+        x0, y0, x1, y1 = self.cards[job_id]["box"]
+        region = c.cget("scrollregion").split()
+        total = float(region[3]) if len(region) == 4 else 1
+        top, bottom = c.canvasy(0), c.canvasy(c.winfo_height())
+        if y0 < top:
+            c.yview_moveto(max(0, y0 - HEAD_H) / total)
+        elif y1 > bottom:
+            c.yview_moveto((y1 - c.winfo_height() + PAD) / total)
+        self._want_visible()
+
+    def _at(self, e) -> int | None:
+        c = self.canvas
+        x, y = c.canvasx(e.x), c.canvasy(e.y)
+        for jid, card in self.cards.items():
+            x0, y0, x1, y1 = card["box"]
+            if x0 + 4 <= x <= x1 - 4 and y0 + 4 <= y <= y1 - 4:
+                return jid
+        return None
+
+    def choose(self, job_id) -> None:
+        self.tab.select(job_id)                             # the tree holds the selection
+        self.see(job_id)
+
+    def _click(self, e) -> None:
+        self.canvas.focus_set()
+        jid = self._at(e)
+        if jid is not None:
+            self.choose(jid)
+
+    def _double(self, e):
+        jid = self._at(e)
+        if jid is not None:
+            self.choose(jid)
+            self.tab.open_selected()
+            return "break"
+
+    def _context(self, e) -> None:
+        jid = self._at(e)
+        if jid is None:
+            return
+        self.choose(jid)
+        try:
+            self.tab.menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            self.tab.menu.grab_release()
+
+    def _wheel(self, e) -> None:
+        if getattr(e, "num", 0) == 4 or getattr(e, "delta", 0) > 0:
+            self.canvas.yview_scroll(-1, "units")
+        else:
+            self.canvas.yview_scroll(1, "units")
+        self._want_visible()
+
+    def _move(self, step) -> None:
+        if not self.order:
+            return
+        if self.sel not in self.order:
+            self.choose(self.order[0])
+            return
+        i = self.order.index(self.sel)
+        if step in ("up", "down"):                         # same column in the row above / below (within the day)
+            x0, y0 = self.cards[self.sel]["box"][:2]
+            same_col = [jid for jid in self.order if self.cards[jid]["box"][0] == x0]
+            k = same_col.index(self.sel) + (-1 if step == "up" else 1)
+            if 0 <= k < len(same_col):
+                self.choose(same_col[k])
+            return
+        k = i + step
+        if 0 <= k < len(self.order):
+            self.choose(self.order[k])
+
+    def _yview(self, *args) -> None:
+        self.canvas.yview(*args)
+        self._want_visible()
+
+    def _yset(self, first, last) -> None:
+        self.sb.set(first, last)
+
+
+def _mix(a: str, b: str, t: float) -> str:
+    """Colour between a and b ('#rrggbb'), t = share of b."""
+    try:
+        ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+        cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+        return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+    except (ValueError, IndexError):
+        return b
 
 
 def build_tab(nb, root, pal) -> HistoryTab:
