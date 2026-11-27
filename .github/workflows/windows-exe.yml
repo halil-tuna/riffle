@@ -3,7 +3,8 @@ name: Windows installer
 on:
   push:
     tags: ["v*"]
-    branches: ["main"]     # every push runs the tests + package check; a release only comes from a tag
+    branches: ["main", "gecmis"]   # every push runs the tests + package check (the installer is an artifact);
+                                   # a release only comes from a v* tag. gecmis = History trial branch.
   workflow_dispatch:
 
 permissions:
@@ -43,6 +44,7 @@ jobs:
           $env:RIFFLE_AUTOCLOSE_MS = '1500'
           $env:RIFFLE_LANG = 'en'
           $env:RIFFLE_NO_UPDATE_CHECK = '1'
+          $env:RIFFLE_NO_WELCOME = '1'     # the first-run window would wait for a click
           Start-Process $exe -ArgumentList 'compress', "`"$PWD\sample.pdf`"" -Wait
           Start-Process $exe -ArgumentList 'pdf2word', "`"$PWD\sample.pdf`"" -Wait
           if (-not (Test-Path 'sample_compressed.pdf')) { throw "package: compress failed" }
