@@ -4,6 +4,7 @@ the "Result: PDF | Word" choice in the order window and its connection to main /
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -217,6 +218,44 @@ def test_pdf_part_keeps_its_place_after_an_indented_document(work):
     assert abs(min(w[0] for w in words if w[4].startswith("Paragraf")) - x0) < 3
 
 
+@pytest.fixture
+def no_converter(monkeypatch):
+    """Neither Word nor LibreOffice: a .docx can't be made a PDF and is joined as it is (the fallback)."""
+    from riffle import actions
+
+    def fail(*_a, **_k):
+        raise ConversionError("LibreOffice yok")
+    monkeypatch.setattr(actions, "office_to_pdf_many", fail)
+    monkeypatch.setattr(actions, "_office_com_to_pdf", lambda *_a: False)
+
+
+def test_word_files_go_through_the_exact_layout(work):
+    """Halil: "birebir olsun". A Word file is printed to PDF and comes in as the exact layout like a PDF: its text
+    sits in positioned boxes and it shares no style, default, header or section with the other files."""
+    import zipfile
+    from riffle import actions
+    if not actions._find_soffice():
+        pytest.skip("LibreOffice yok")
+    a = _indented_docx(work / "1 odev.docx")
+    b = _styled_docx(work / "2 cozum.docx", "Times New Roman", 11, "İkinci belge")
+    msgs = []
+    out = officetools.merge_to_word([a, b], msgs.append, ordered=True)[0]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode("utf-8")
+    boxes = "".join(re.findall(r"<w:txbxContent>(.*?)</w:txbxContent>", xml, re.S))
+    assert "Ödev metni" in "".join(re.findall(r"<w:t[^>]*>([^<]*)", boxes))
+    assert "İkinci belge" in "".join(re.findall(r"<w:t[^>]*>([^<]*)", boxes))
+    assert not any("olduğu gibi" in m or "as it is" in m for m in msgs)
+
+
+def test_without_a_converter_word_files_are_joined_as_they_are(work, no_converter):
+    msgs = []
+    a = _docx(work / "1 a.docx", "Birinci")
+    b = _docx(work / "2 b.docx", "İkinci")
+    out = officetools.merge_to_word([a, b], msgs.append, ordered=True)[0]
+    assert "İkinci" in _texts(out)
+    assert sum(m.startswith("ℹ") and ("olduğu gibi" in m or "as it is" in m) for m in msgs) == 2
+
+
 def _styled_docx(path: Path, font: str, size: float, text: str, header: str | None = None,
                  logo: Path | None = None, indent: bool = False) -> Path:
     """Like Word's own PDF import: a 'Body Text' style whose font/size is this document's, text in that style,
@@ -256,8 +295,8 @@ def _style_of(out: Path, text: str):
     return next(s for s in d.styles.element.findall(qn("w:style")) if s.get(qn("w:styleId")) == ps.get(qn("w:val")))
 
 
-def test_same_named_styles_keep_each_documents_look(work):
-    """Halil's midterm: two Word files from Word's PDF import both have 'Body Text' — 19.5 pt Arial in the first,
+def test_same_named_styles_keep_each_documents_look(work, no_converter):
+    """(Joined as they are — the fallback without Word/LibreOffice.) Halil's midterm: two Word files from Word's PDF import both have 'Body Text' — 19.5 pt Arial in the first,
     Times in the second. The second came out in big Arial (docxcompose keeps the first definition by name).
     Now each part's styles are its own, and its plain paragraphs don't take the first file's Normal either."""
     from docx.oxml.ns import qn
@@ -278,8 +317,8 @@ def test_same_named_styles_keep_each_documents_look(work):
     assert len(names) == len(set(names))                             # Word wants unique style names
 
 
-def test_each_document_keeps_its_own_header(work):
-    """The midterm's university logo was in its header; merged after a file without a header it was gone (and a
+def test_each_document_keeps_its_own_header(work, no_converter):
+    """(Joined as they are — the fallback without Word/LibreOffice.) The midterm's university logo was in its header; merged after a file without a header it was gone (and a
     header of the first file would have run on over every other file). Now: each its own; none → none."""
     from PIL import Image
     from docx.oxml.ns import qn
@@ -330,8 +369,8 @@ def _two_section_docx(path: Path, text: str) -> Path:
     return path
 
 
-def test_a_files_continuous_section_stays_continuous(work):
-    """Halil's midterm, last page: the figure in a 4-column section, question (b) below it in a 'continuous'
+def test_a_files_continuous_section_stays_continuous(work, no_converter):
+    """(Joined as they are — the fallback without Word/LibreOffice.) Halil's midterm, last page: the figure in a 4-column section, question (b) below it in a 'continuous'
     section. Merging removed the last section's type (= next page) and (b) went to a page of its own. Only a
     file's FIRST section must start a new page; the others keep their type."""
     import docx

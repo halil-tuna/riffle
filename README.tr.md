@@ -14,10 +14,11 @@ Dosyaların bilgisayarından çıkmaz, sınır yok. Windows 11 ve Linux Mint (Ci
 PDF, görsel (iPhone HEIC dahil) ve Word/Excel/PowerPoint dosyalarını **birlikte** seçip sağ tıkla.
 Birden çok dosyada önce **küçük sıralama penceresi** anında açılır (sayfalar yüklenmez): sırayı ayarla,
 **Birleştir** de — bitti. Sonuç **PDF** (varsayılan) ya da **Word** olabilir: sıralama penceresindeki
-*Sonuç: PDF | Word* seçimi (son seçimin hatırlanır). Word'de her dosya önce Word'e çevrilir — PDF'ler Riffle'ın
-birebir düzen çevirisiyle (her sayfa göründüğü gibi; OCR yok, hızlı), PowerPoint/Excel PDF üzerinden,
-.doc/.odt/.rtf LibreOffice ile, görseller sayfaya oturtulmuş resim olarak — sonra tek `…_birlesik.docx` olur;
-her dosya yeni sayfada ve **kendi sayfa boyutu/yönüyle** başlar (yatay slayt yatay kalır), ara dosya bırakılmaz.
+*Sonuç: PDF | Word* seçimi (son seçimin hatırlanır). Word'de her belge (PDF, Word, PowerPoint, Excel) PDF
+üzerinden Riffle'ın **birebir düzen** çevirisiyle gelir (her sayfa tek başına açıldığındaki gibi; OCR yok, hızlı;
+Word dosyalarını Word kuruluysa Word, değilse LibreOffice PDF'e çevirir), görseller sayfaya oturtulmuş resim olarak —
+sonra tek `…_birlesik.docx` olur; her dosya yeni sayfada başlar ve **kendi görünümünü** korur (sayfa boyutu/yönü,
+yazı tipleri, üst bilgi; dosyalar birbirinin stilini almaz), ara dosya bırakılmaz.
 Sayfa sayfa iş gerekiyorsa **Sayfa sayfa düzenle…** ile düzenleyiciye geç
 (tek dosyada doğrudan düzenleyici açılır). Düzenleyicide bütün sayfalar küçük resim olarak açılır:
 

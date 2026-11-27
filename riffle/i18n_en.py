@@ -557,4 +557,7 @@ CATALOG = {
     "Word'e çevriliyor: {0} dosya": 'Converting to Word: {0} files',
     "Word'e çevriliyor: {0}": 'Converting to Word: {0}',
     'Sonuç:': 'Result:',
+    "ℹ {0}: PDF'e çevrilemedi (Word ya da LibreOffice yok), olduğu gibi eklendi; görünümü biraz değişebilir.":
+        'ℹ {0}: could not be made a PDF (no Word or LibreOffice), added as it is; its look may change a little.',
+    "{0} PDF'e çevrilemedi.": '{0} could not be converted to PDF.',
 }

@@ -198,18 +198,18 @@ def merge_word(paths: list[Path], progress: Progress, ordered: bool = False, **_
 # ============================================================ merge mixed files as one Word document
 
 WORD_NATIVE = {".docx"}
-WORD_LO = {".doc", ".odt", ".rtf", ".txt", ".html", ".htm"}          # LibreOffice → .docx
+WORD_LO = {".doc", ".odt", ".rtf", ".txt", ".html", ".htm"}          # Word / LibreOffice → PDF
 VIA_PDF = {".ppt", ".pptx", ".odp", ".xls", ".xlsx", ".ods", ".csv"}  # LibreOffice → PDF → Riffle's PDF → Word
+# (in merge as Word every document goes through PDF to the exact layout: see _to_docx_all)
 
 
 def merge_to_word(paths: list[Path], progress: Progress, ordered: bool = False, **_) -> list[Path]:
     """PDF, Word, PowerPoint, Excel and image files → ONE Word document, in the given order.
 
-    Every file is first made a .docx in a temporary folder (nothing is left next to the sources): PDFs with
-    Riffle's PDF → Word in exact layout (no OCR — Halil: "the editable boxes are not that important"), slides
-    and sheets through PDF,
-    .doc/.odt/.rtf with LibreOffice, images as a page with the picture. Then they are joined; each file starts
-    on a new page and keeps its own page size and orientation (a landscape slide stays landscape)."""
+    Every file is first made a .docx in a temporary folder (nothing is left next to the sources): every document
+    (PDF, Word, PowerPoint, Excel…) through PDF to Riffle's exact layout, never OCR (Halil: "birebir olsun", the
+    editable boxes are not that important), images as a page with the picture. Then they are joined; each file
+    starts on a new page and looks as it does on its own (size, orientation, fonts, headers)."""
     from .actions import sorted_by_name
     paths = [Path(p) for p in (paths if ordered else sorted_by_name(list(paths)))]
     if len(paths) < 2:
@@ -236,41 +236,56 @@ def merge_to_word(paths: list[Path], progress: Progress, ordered: bool = False, 
 
 
 def _to_docx_all(paths: list[Path], tmp: Path, progress: Progress) -> tuple[list, list[str]]:
-    """[(source, docx in tmp)] in order + error lines for the files that could not be converted."""
+    """[(source, docx in tmp)] in order + error lines for the files that could not be converted.
+
+    Every document goes PDF → Riffle's exact layout, Word files too (Halil: "birebir olsun"): each part is then
+    self-contained positioned boxes and looks exactly as the file does on its own. Joining Word files as they
+    are made them share ONE style sheet, one set of defaults, one header chain and section chain with the
+    other files — four different breakages in one evening (a later file in the first one's 19.5 pt Arial, its
+    logo gone, pen marks displaced, a question pushed to its own page). Word files are printed to PDF by Word
+    itself when it is installed (what the file looks like on its own), otherwise by LibreOffice; with neither,
+    a .docx is joined as it is (and a note says so)."""
+    import sys
     from . import actions
     docx_of: dict[Path, Path] = {}
     errors: dict[Path, str] = {}
-    by_lo_docx = [p for p in paths if p.suffix.lower() in WORD_LO]
-    by_pdf = [p for p in paths if p.suffix.lower() in VIA_PDF]
     pdf_of: dict[Path, Path] = {}
-    if by_lo_docx:                                     # one LibreOffice call for all of them
+    by_pdf = [p for p in paths if p.suffix.lower() in VIA_PDF | WORD_NATIVE | WORD_LO]
+    if sys.platform == "win32":                     # Word renders Word files the way they look on their own
+        word_dir = tmp / "word_pdf"
+        for i, p in enumerate(x for x in by_pdf if x.suffix.lower() in WORD_NATIVE | WORD_LO):
+            word_dir.mkdir(exist_ok=True)
+            out = word_dir / f"{i:03d}.pdf"
+            progress(T("PDF'e çevriliyor: {0}", p.name))
+            try:
+                if actions._office_com_to_pdf(p, out) and out.exists():
+                    pdf_of[p] = out
+            except Exception:
+                pass
+    rest = [p for p in by_pdf if p not in pdf_of]
+    if rest:
         try:
-            docx_of.update(_lo_convert(by_lo_docx, tmp / "lo_docx", "docx", progress))
+            pdf_of.update(actions.office_to_pdf_many(rest, tmp / "lo_pdf", progress))
         except ConversionError as e:
-            for p in by_lo_docx:
-                errors[p] = f"{p.name}: {e}"
-        for p in by_lo_docx:
-            if p not in docx_of and p not in errors:
-                by_pdf.append(p)                       # LibreOffice could not make a .docx: try through PDF
-    if by_pdf:
-        try:
-            pdf_of.update(actions.office_to_pdf_many(by_pdf, tmp / "lo_pdf", progress))
-        except ConversionError as e:
-            for p in by_pdf:
-                errors.setdefault(p, f"{p.name}: {e}")
+            for p in rest:
+                if p.suffix.lower() not in WORD_NATIVE:
+                    errors.setdefault(p, f"{p.name}: {e}")
     for i, p in enumerate(paths):
-        if p in errors or p in docx_of:
+        if p in errors:
             continue
         ext = p.suffix.lower()
         try:
-            if ext in WORD_NATIVE:
+            if ext == ".pdf" or p in pdf_of:
+                docx_of[p] = _pdf_to_docx(pdf_of.get(p, p), p, tmp / f"w{i:03d}", progress)
+            elif ext in WORD_NATIVE:                  # no Word, no LibreOffice: joined as it is
                 docx_of[p] = p
-            elif ext == ".pdf" or p in pdf_of:
-                src = pdf_of.get(p, p)
-                docx_of[p] = _pdf_to_docx(src, p, tmp / f"w{i:03d}", progress)
+                progress(T("ℹ {0}: PDF'e çevrilemedi (Word ya da LibreOffice yok), olduğu gibi eklendi; görünümü "
+                           "biraz değişebilir.", p.name))
             elif ext.lstrip(".") in actions.IMAGES:
                 docx_of[p] = _image_to_docx(p, tmp / f"w{i:03d}.docx")
-            elif p not in pdf_of:
+            elif ext in WORD_LO | VIA_PDF:
+                errors[p] = T("{0} PDF'e çevrilemedi.", p.name)
+            else:
                 errors[p] = T("{0}: desteklenmeyen dosya, atlandı", p.name)
         except actions.ConversionError as e:
             errors[p] = str(e)
@@ -326,30 +341,6 @@ def _image_to_docx(p: Path, out: Path) -> Path:
     para.add_run().add_picture(str(png), width=int(w * scale), height=int(h * scale))
     doc.save(str(out))
     return out
-
-
-def _lo_convert(paths: list[Path], outdir: Path, fmt: str, progress: Progress) -> dict:
-    """{source: converted file} with ONE LibreOffice call (like actions.office_to_pdf_many)."""
-    import sys
-    from . import actions
-    soffice = actions._find_soffice()
-    if not soffice:
-        return {}                                        # → through PDF (Office on Windows can do that part)
-    outdir.mkdir(parents=True, exist_ok=True)
-    staged = []
-    for i, p in enumerate(paths):
-        dst = outdir / "_kaynak" / f"{i:03d}{p.suffix.lower()}"
-        dst.parent.mkdir(exist_ok=True)
-        shutil.copyfile(p, dst)
-        staged.append(dst)
-    progress(T("Word'e çevriliyor: {0} dosya", len(paths)) if len(paths) > 1 else
-             T("Word'e çevriliyor: {0}", paths[0].name))
-    flags = 0x08000000 if sys.platform == "win32" else 0
-    with actions._LoProfile() as profile:
-        cmd = [soffice, f"-env:UserInstallation={profile}", "--headless", "--convert-to", fmt,
-               "--outdir", str(outdir), *map(str, staged)]
-        actions._run_cancellable(cmd, 120 + 120 * len(paths), flags)
-    return {p: outdir / f"{st.stem}.{fmt}" for p, st in zip(paths, staged) if (outdir / f"{st.stem}.{fmt}").exists()}
 
 
 def _compose_sections(parts: list[Path], out: Path, progress: Progress) -> None:
