@@ -297,9 +297,13 @@ def test_menu_hidden_and_favorites(cfg):
     assert top[:3] == ["compress", "pdf2word", "merge"]
     all_ids = [a.id for _, acts in tree for a in acts]
     assert "pdf2excel" not in all_ids and "watermark" not in all_ids
-    assert all_ids[-1] == "settings" and all_ids.count("compress") == 1
+    assert all_ids[-1] == "settings" and all_ids.count("compress") == 2
     conv = next(acts for g, acts in tree if g == "Dönüştür")
-    assert "pdf2word" not in [a.id for a in conv]                 # moved to the top, not repeated in the group
+    assert "pdf2word" in [a.id for a in conv]                     # at the top AND still in its group
+    assert [a.id for a in tree[0][1]].count("pdf2word") == 1
+    flat = install.menu_tree("png")                                # few actions: one flat list, no repeats
+    flat_ids = [a.id for _, acts in flat for a in acts]
+    assert len(flat_ids) == len(set(flat_ids))
 
 
 def test_record_use_triggers_refresh(cfg):
@@ -327,8 +331,10 @@ def test_nemo_respects_hidden(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(install, "NEMO_DIR", tmp_path / "nemo")
     install.install_linux()
     assert not (tmp_path / "nemo" / "riffle_merge.nemo_action").exists()
+    fav = (tmp_path / "nemo" / "riffle_compress_fav.nemo_action").read_text(encoding="utf-8")
+    assert "Name=Riffle › Sıkıştır" in fav                          # favourite: right under Riffle …
     comp = (tmp_path / "nemo" / "riffle_compress.nemo_action").read_text(encoding="utf-8")
-    assert "Name=Riffle › Sıkıştır" in comp                         # favourites: no group
+    assert "Name=Riffle › Küçült / Onar › Sıkıştır" in comp         # … and still in its group
     st = (tmp_path / "nemo" / "riffle_settings.nemo_action").read_text(encoding="utf-8")
     assert "Extensions=dir;pdf;" in st
 

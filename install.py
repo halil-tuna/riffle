@@ -111,10 +111,12 @@ def menu_tree(ext: str) -> list:
     acts = [a for a in acts if a.id != "settings"]
     top = sorted((a for a in acts if a.id in favs), key=lambda a: favs.index(a.id))
     rest = [a for a in acts if a.id not in favs]
-    if len(acts) <= 6 or not any(a.group for a in rest):
+    if len(acts) <= 6 or not any(a.group for a in acts):
         return [(None, top + rest + tail)]
+    # Grouped menu: favourites at the top AND still in their own group (nothing disappears from where it
+    # was learnt, e.g. PDF → Word stays under "Convert" too)
     tree: list = [(None, list(top))]
-    for a in rest:
+    for a in acts:
         key = a.group or None
         for node in tree:
             if node[0] == key:
@@ -294,19 +296,23 @@ def install_linux() -> None:
         if FOLDER in action.extensions:
             ext_line = ("dir;" + ext_line) if exts else "dir;"
         selection = "m" if action.multi_only else "notnone"
-        group = "" if action.id in favs or not action.group else T(action.group) + " › "
-        content = (
-            "[Nemo Action]\n"
-            "Active=true\n"
-            f"Name=Riffle › {group}{T(action.label)}\n"
-            f"Comment={APP_NAME}: {T(action.label)}\n"
-            f"Exec={prefix} {action.id} %F\n"
-            "Icon-Name=document-export\n"
-            f"Selection={selection}\n"
-            f"Extensions={ext_line}\n"
-            "Quote=double\n"
-        )
-        (NEMO_DIR / f"riffle_{action.id}.nemo_action").write_text(content, encoding="utf-8")
+        group = T(action.group) + " › " if action.group else ""
+        # favourites: an extra entry right under "Riffle ›", the usual one stays in its group
+        names = [("", f"riffle_{action.id}")] if action.id not in favs or not group else \
+            [("", f"riffle_{action.id}_fav"), (group, f"riffle_{action.id}")]
+        for grp, fname in names:
+            content = (
+                "[Nemo Action]\n"
+                "Active=true\n"
+                f"Name=Riffle › {grp if action.id in favs else group}{T(action.label)}\n"
+                f"Comment={APP_NAME}: {T(action.label)}\n"
+                f"Exec={prefix} {action.id} %F\n"
+                "Icon-Name=document-export\n"
+                f"Selection={selection}\n"
+                f"Extensions={ext_line}\n"
+                "Quote=double\n"
+            )
+            (NEMO_DIR / f"{fname}.nemo_action").write_text(content, encoding="utf-8")
     print(T("✔ Nemo eylemleri yazıldı: {0}", NEMO_DIR))
     print(T("  Masaüstünde/Nemo'da dosyaya sağ tık → 'Riffle › …' satırları."))
     print(T("  Görünmezse: nemo -q  (Nemo'yu yeniden başlatır)"))
