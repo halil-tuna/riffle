@@ -353,12 +353,17 @@ def _lo_convert(paths: list[Path], outdir: Path, fmt: str, progress: Progress) -
 
 
 def _compose_sections(parts: list[Path], out: Path, progress: Progress) -> None:
-    """Joins .docx files; every part starts a new section that keeps ITS page size, margins and orientation.
+    """Joins .docx files; every part keeps ITS look: page size, margins, orientation, styles, headers/footers.
 
-    docxcompose drops an appended document's last section properties (its body sectPr): a landscape slide
-    deck would end on A4 portrait pages. So before each part the current last section is closed with a
-    section break carrying its own properties, and after the part the body's properties are replaced by
-    the part's (page setup only: headers/footers stay those of the first document, as in Word merging)."""
+    docxcompose alone gets three things wrong for documents that were not made from one template:
+    - it drops an appended document's last section properties (a landscape deck would end on A4 portrait);
+    - styles with the same name take the FIRST document's definition (two Word files made by Word's own PDF
+      import both have a 'Body Text', one 19.5 pt Arial, the other Times: the second came out in big Arial,
+      its lines moved and the pen marks anchored to them landed in the wrong places — Halil's midterm);
+    - the appended documents' headers and footers are dropped (the university logo was gone).
+    So every part's styles are made its own first (_isolate_styles), before each part the current last
+    section is closed with a section break carrying its own properties, and after the part each of its
+    sections gets its own page setup and its own headers/footers (_carry_headers)."""
     from copy import deepcopy
     from docx import Document
     from docx.oxml.ns import qn
@@ -366,31 +371,299 @@ def _compose_sections(parts: list[Path], out: Path, progress: Progress) -> None:
     master = Document(str(parts[0]))
     comp = Composer(master)
     body = master.element.body
-    keep = (qn("w:pgSz"), qn("w:pgMar"), qn("w:cols"), qn("w:docGrid"), qn("w:vAlign"), qn("w:textDirection"))
+    keep = {qn("w:" + t) for t in ("pgSz", "pgMar", "paperSrc", "pgBorders", "lnNumType", "pgNumType", "cols",
+                                   "vAlign", "titlePg", "textDirection", "bidi", "rtlGutter", "docGrid")}
     for k, part in enumerate(parts[1:], 2):
         progress(T("Ekleniyor ({0}/{1}): {2}", k, len(parts), part.name))
         try:
             doc = Document(str(part))
         except Exception as e:
             raise ConversionError(T("{0} açılamadı: {1}", part.name, e))
+        _isolate_styles(doc, k)
+        _merge_font_tables(master, doc)
         _close_last_section(master)
+        inner_before = len(body.findall(f"{qn('w:p')}/{qn('w:pPr')}/{qn('w:sectPr')}"))
         comp.append(doc)
-        src = doc.element.body.find(qn("w:sectPr"))
         dst = body.find(qn("w:sectPr"))
-        if src is not None and dst is not None:
-            for tag in keep:
-                for old in dst.findall(tag):
-                    dst.remove(old)
-            hdr = {qn("w:headerReference"), qn("w:footerReference")}
-            pos = sum(1 for c in dst if c.tag in hdr)          # page setup goes after the header/footer refs
-            for tag in keep:
-                for el in src.findall(tag):
-                    dst.insert(pos, deepcopy(el))
-                    pos += 1
-            ttype = dst.find(qn("w:type"))
-            if ttype is not None:
-                dst.remove(ttype)                               # (default = next page)
+        src_sects = [s._sectPr for s in doc.sections]
+        if dst is None or not src_sects:
+            continue
+        src = src_sects[-1]
+        for old in [c for c in dst if c.tag in keep or c.tag == qn("w:type")]:
+            dst.remove(old)                                     # (no w:type = next page)
+        for el in src:
+            if el.tag in keep:
+                dst.append(deepcopy(el))
+        _sort_children(dst, _SECTPR_ORDER)
+        # headers/footers: the part's inner sections came in as paragraphs, its last one is the body's now
+        inner = body.findall(f"{qn('w:p')}/{qn('w:pPr')}/{qn('w:sectPr')}")[inner_before:]
+        if len(inner) == len(src_sects) - 1:
+            for i, (s_src, s_dst) in enumerate(zip(src_sects, inner + [dst])):
+                _carry_headers(master, doc, s_src, s_dst, first=i == 0)
     comp.save(str(out))
+
+
+_SECTPR_ORDER = ("headerReference", "footerReference", "footnotePr", "endnotePr", "type", "pgSz", "pgMar",
+                 "paperSrc", "pgBorders", "lnNumType", "pgNumType", "cols", "formProt", "vAlign", "noEndnote",
+                 "titlePg", "textDirection", "bidi", "rtlGutter", "docGrid", "printerSettings", "sectPrChange")
+_STYLE_ORDER = ("name", "aliases", "basedOn", "next", "link", "autoRedefine", "hidden", "uiPriority", "semiHidden",
+                "unhideWhenUsed", "qFormat", "locked", "personal", "personalCompose", "personalReply", "rsid",
+                "pPr", "rPr", "tblPr", "trPr", "tcPr", "tblStylePr")
+_PPR_ORDER = ("pStyle", "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl", "numPr",
+              "suppressLineNumbers", "pBdr", "shd", "tabs", "suppressAutoHyphens", "kinsoku", "wordWrap",
+              "overflowPunct", "topLinePunct", "autoSpaceDE", "autoSpaceDN", "bidi", "adjustRightInd", "snapToGrid",
+              "spacing", "ind", "contextualSpacing", "mirrorIndents", "suppressOverlap", "jc", "textDirection",
+              "textAlignment", "textboxTightWrap", "outlineLvl", "divId", "cnfStyle", "rPr", "sectPr", "pPrChange")
+_RPR_ORDER = ("rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike", "dstrike", "outline",
+              "shadow", "emboss", "imprint", "noProof", "snapToGrid", "vanish", "webHidden", "color", "spacing", "w",
+              "kern", "position", "sz", "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText", "vertAlign",
+              "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath", "rPrChange")
+# What Word assumes when neither the style chain nor the document defaults say it: written into a part's root
+# style so that the FIRST document's defaults can't fill the gap instead.
+_WORD_FALLBACK_PPR = '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:ind w:left="0" w:right="0"/>'
+_WORD_FALLBACK_RPR = '<w:sz w:val="20"/><w:szCs w:val="20"/>'
+
+
+def _sort_children(el, order: tuple) -> None:
+    """Puts the children in schema order (Word rejects some out-of-order files as 'unreadable content')."""
+    rank = {t: i for i, t in enumerate(order)}
+    kids = list(el)
+    kids.sort(key=lambda c: rank.get(c.tag.rsplit("}", 1)[-1], len(order)))   # stable: unknown tags last
+    for c in kids:
+        el.append(c)
+
+
+def _merge_props(dst, src) -> None:
+    """Adds src's properties (a pPr/rPr) that dst doesn't set; for the same element, the missing attributes.
+    dst wins everywhere: it is the more specific one (a style over the document defaults)."""
+    from copy import deepcopy
+    from docx.oxml.ns import qn
+    for el in src:
+        have = dst.find(el.tag)
+        if have is None:
+            dst.append(deepcopy(el))
+            continue
+        name = el.tag.rsplit("}", 1)[-1]
+        for a, v in el.attrib.items():
+            if a in have.attrib:
+                continue
+            local = a.rsplit("}", 1)[-1]
+            if name == "rFonts":                       # 'ascii' and 'asciiTheme' are one setting: don't override
+                base = _FONT_THEME.get(local, local)
+                if any(have.get(qn("w:" + x)) is not None for x in (base, _THEME_OF[base])):
+                    continue
+            if name == "ind" and local in ("firstLine", "hanging", "firstLineChars", "hangingChars") and any(
+                    have.get(qn("w:" + x)) is not None for x in ("firstLine", "hanging", "firstLineChars",
+                                                                 "hangingChars")):
+                continue
+            if name == "ind" and local in ("left", "start") and any(
+                    have.get(qn("w:" + x)) is not None for x in ("left", "start")):
+                continue
+            if name == "ind" and local in ("right", "end") and any(
+                    have.get(qn("w:" + x)) is not None for x in ("right", "end")):
+                continue
+            have.set(a, v)
+
+
+_FONT_THEME = {"asciiTheme": "ascii", "hAnsiTheme": "hAnsi", "eastAsiaTheme": "eastAsia", "cstheme": "cs"}
+_THEME_OF = {v: k for k, v in _FONT_THEME.items()} | {"hint": "hint"}
+
+
+def _isolate_styles(doc, k: int) -> None:
+    """Makes a part's formatting independent of the document it is appended to.
+
+    Every style gets a new id and name (docxcompose matches styles by NAME and keeps the first document's), the
+    part's document defaults are written into its root paragraph styles, and every paragraph and table names its
+    style explicitly (a paragraph without one would take the first document's default style)."""
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls, qn
+    W = lambda t: qn("w:" + t)                                    # noqa: E731
+    styles = doc.styles.element
+    suffix = f"R{k}"
+    id_map: dict[str, str] = {}
+    default_of: dict[str, str] = {}                               # type → new id of the default style
+    all_styles = styles.findall(W("style"))
+    taken = {st.get(W("styleId")) for st in all_styles}
+    for st in all_styles:
+        old = st.get(W("styleId"))
+        new = f"{old}{suffix}"
+        while new in taken:
+            new += "x"
+        id_map[old] = new
+    for st in all_styles:
+        st.set(W("styleId"), id_map[st.get(W("styleId"))])
+        name = st.find(W("name"))
+        if name is not None:
+            name.set(W("val"), f"{name.get(W('val'))} ({k})")
+        for ref in ("basedOn", "next", "link"):
+            el = st.find(W(ref))
+            if el is not None and el.get(W("val")) in id_map:
+                el.set(W("val"), id_map[el.get(W("val"))])
+        if st.get(W("default")) in ("1", "true", "on"):
+            default_of[st.get(W("type"))] = st.get(W("styleId"))
+            del st.attrib[W("default")]
+    # a part without a default paragraph style (Riffle's exact layout, python-docx-free files) gets one
+    if "paragraph" not in default_of:
+        new = f"Normal{suffix}"
+        while new in taken or new in id_map.values():
+            new += "x"
+        styles.append(parse_xml(f'<w:style {nsdecls("w")} w:type="paragraph" w:styleId="{new}">'
+                                f'<w:name w:val="Normal ({k})"/><w:qFormat/></w:style>'))
+        default_of["paragraph"] = new
+    # document defaults → every root paragraph style (no basedOn); then Word's own fallbacks for what's still unset
+    dd = styles.find(W("docDefaults"))
+    ppr_d = dd.find(f"{W('pPrDefault')}/{W('pPr')}") if dd is not None else None
+    rpr_d = dd.find(f"{W('rPrDefault')}/{W('rPr')}") if dd is not None else None
+    fallback_p = parse_xml(f'<w:pPr {nsdecls("w")}>{_WORD_FALLBACK_PPR}</w:pPr>')
+    fallback_r = parse_xml(f'<w:rPr {nsdecls("w")}>{_WORD_FALLBACK_RPR}</w:rPr>')
+    for st in styles.findall(W("style")):
+        if st.get(W("type")) != "paragraph" or st.find(W("basedOn")) is not None:
+            continue
+        for tag, d, fb, order in (("pPr", ppr_d, fallback_p, _PPR_ORDER), ("rPr", rpr_d, fallback_r, _RPR_ORDER)):
+            el = st.find(W(tag))
+            if el is None:
+                el = parse_xml(f"<w:{tag} {nsdecls('w')}/>")
+                st.append(el)
+            if d is not None:
+                _merge_props(el, d)
+            _merge_props(el, fb)
+            _sort_children(el, order)
+        _sort_children(st, _STYLE_ORDER)
+    # rename the references everywhere the part's content is, and make the default style explicit
+    roots = [doc.element]
+    for rel in doc.part.rels.values():
+        if not rel.is_external and hasattr(rel.target_part, "element"):
+            roots.append(rel.target_part.element)
+    num = None
+    try:
+        num = doc.part.numbering_part.element
+        roots.append(num)
+    except (KeyError, NotImplementedError, AttributeError):
+        pass
+    for root in roots:
+        for tag in ("pStyle", "rStyle", "tblStyle", "styleLink", "numStyleLink"):
+            for el in root.iter(W(tag)):
+                if el.get(W("val")) in id_map:
+                    el.set(W("val"), id_map[el.get(W("val"))])
+    p_default, t_default = default_of["paragraph"], default_of.get("table")
+    for root in roots:
+        if root is num:
+            continue
+        for p in root.iter(W("p")):
+            ppr = p.find(W("pPr"))
+            if ppr is None:
+                ppr = parse_xml(f"<w:pPr {nsdecls('w')}/>")
+                p.insert(0, ppr)
+            if ppr.find(W("pStyle")) is None:
+                ps = parse_xml(f'<w:pStyle {nsdecls("w")} w:val="{p_default}"/>')
+                ppr.insert(0, ps)
+        if t_default:
+            for tbl in root.iter(W("tbl")):
+                tpr = tbl.find(W("tblPr"))
+                if tpr is not None and tpr.find(W("tblStyle")) is None:
+                    tpr.insert(0, parse_xml(f'<w:tblStyle {nsdecls("w")} w:val="{t_default}"/>'))
+
+
+def _carry_headers(master, doc, src_sect, dst_sect, first: bool) -> None:
+    """The part's section src_sect → its headers/footers onto the merged document's section dst_sect.
+
+    docxcompose drops them (the first document's would continue over every other file). In a part's first section,
+    a header type the part doesn't define gets an empty one, so the previous file's header doesn't run on."""
+    import io
+    from copy import deepcopy
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls, qn
+    from docx.parts.hdrftr import FooterPart, HeaderPart
+    W = lambda t: qn("w:" + t)                                    # noqa: E731
+    R_ID, R_EMBED, R_LINK = qn("r:id"), qn("r:embed"), qn("r:link")
+    for old in [c for c in dst_sect if c.tag in (W("headerReference"), W("footerReference"))]:
+        dst_sect.remove(old)
+    refs = []
+    for ref in src_sect:
+        kind = {W("headerReference"): "header", W("footerReference"): "footer"}.get(ref.tag)
+        if kind is None:
+            continue
+        try:
+            src_part = doc.part.related_parts[ref.get(R_ID)]
+        except KeyError:
+            continue
+        cls = HeaderPart if kind == "header" else FooterPart
+        new = cls.new(master.part.package)
+        new._element = deepcopy(src_part.element)
+        for el in new._element.iter():
+            for attr in (R_EMBED, R_ID, R_LINK):
+                rid = el.get(attr)
+                if rid is None or rid not in src_part.rels:
+                    continue
+                rel = src_part.rels[rid]
+                try:
+                    if rel.is_external:
+                        el.set(attr, new.relate_to(rel.target_ref, rel.reltype, is_external=True))
+                    elif rel.reltype == RT.IMAGE:
+                        el.set(attr, new.get_or_add_image(io.BytesIO(rel.target_part.blob))[0])
+                except Exception:
+                    pass
+        _ensure_styles(master, doc, new._element)
+        refs.append((kind, ref.get(W("type")) or "default",
+                     master.part.relate_to(new, RT.HEADER if kind == "header" else RT.FOOTER)))
+    if first:
+        types = ["default"] + (["first"] if src_sect.find(W("titlePg")) is not None else [])
+        for kind, cls, rt in (("header", HeaderPart, RT.HEADER), ("footer", FooterPart, RT.FOOTER)):
+            for t in types:
+                if not any(k == kind and tt == t for k, tt, _ in refs):
+                    refs.append((kind, t, master.part.relate_to(cls.new(master.part.package), rt)))
+    for i, (kind, t, rid) in enumerate(refs):
+        dst_sect.insert(i, parse_xml(f'<w:{kind}Reference {nsdecls("w", "r")} w:type="{t}" r:id="{rid}"/>'))
+
+
+def _merge_font_tables(master, doc) -> None:
+    """Font descriptions (family, panose, charset) of the part that the merged document lacks: without them a
+    missing font (e.g. Cambria Math on a computer without it) is replaced by a different-looking one and the
+    part's pages reflow. Embedded font files are not carried (their entries go without the embed links)."""
+    from lxml import etree
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.oxml.ns import qn
+    try:
+        ours = master.part.part_related_by(RT.FONT_TABLE)
+        theirs = doc.part.part_related_by(RT.FONT_TABLE)
+        root, other = etree.fromstring(ours.blob), etree.fromstring(theirs.blob)
+    except Exception:
+        return
+    have = {f.get(qn("w:name")) for f in root.findall(qn("w:font"))}
+    added = False
+    for f in other.findall(qn("w:font")):
+        if f.get(qn("w:name")) in have:
+            continue
+        for emb in [c for c in f if c.tag.rsplit("}", 1)[-1].startswith("embed")]:
+            f.remove(emb)
+        root.append(f)
+        have.add(f.get(qn("w:name")))
+        added = True
+    if added:
+        ours._blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _ensure_styles(master, doc, element) -> None:
+    """Styles used in element (a copied header) that the merged document doesn't have yet: copied from the part,
+    with the styles they are based on."""
+    from copy import deepcopy
+    from docx.oxml.ns import qn
+    W = lambda t: qn("w:" + t)                                    # noqa: E731
+    ours = master.styles.element
+    have = {st.get(W("styleId")) for st in ours.findall(W("style"))}
+    theirs = {st.get(W("styleId")): st for st in doc.styles.element.findall(W("style"))}
+    todo = [el.get(W("val")) for tag in ("pStyle", "rStyle", "tblStyle") for el in element.iter(W(tag))]
+    while todo:
+        sid = todo.pop()
+        if sid in have or sid not in theirs:
+            continue
+        ours.append(deepcopy(theirs[sid]))
+        have.add(sid)
+        for ref in ("basedOn", "link", "next"):
+            el = theirs[sid].find(W(ref))
+            if el is not None:
+                todo.append(el.get(W("val")))
 
 
 def _close_last_section(master) -> None:

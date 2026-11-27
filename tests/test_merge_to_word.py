@@ -217,6 +217,103 @@ def test_pdf_part_keeps_its_place_after_an_indented_document(work):
     assert abs(min(w[0] for w in words if w[4].startswith("Paragraf")) - x0) < 3
 
 
+def _styled_docx(path: Path, font: str, size: float, text: str, header: str | None = None,
+                 logo: Path | None = None, indent: bool = False) -> Path:
+    """Like Word's own PDF import: a 'Body Text' style whose font/size is this document's, text in that style,
+    a plain paragraph in Normal, optionally a header (text + picture)."""
+    import docx
+    from docx.enum.style import WD_STYLE_TYPE
+    from docx.shared import Cm, Pt
+    w = docx.Document()
+    try:
+        st = w.styles["Body Text"]
+    except KeyError:
+        st = w.styles.add_style("Body Text", WD_STYLE_TYPE.PARAGRAPH)
+    st.font.name, st.font.size = font, Pt(size)
+    if indent:
+        w.styles["Normal"].paragraph_format.first_line_indent = Cm(1.25)
+    w.add_paragraph(text, style="Body Text")
+    w.add_paragraph(f"{text} (Normal)")
+    if header:
+        h = w.sections[0].header
+        h.paragraphs[0].text = header
+        if logo:
+            h.add_paragraph().add_run().add_picture(str(logo), width=Cm(2))
+    w.save(path)
+    return path
+
+
+def _style_of(out: Path, text: str):
+    """The style element of the paragraph holding text in the merged file."""
+    import docx
+    from docx.oxml.ns import qn
+    d = docx.Document(str(out))
+    p = next(p for p in d.paragraphs if p.text == text)
+    ps = p._p.pPr.find(qn("w:pStyle")) if p._p.pPr is not None else None
+    if ps is None:                                            # no pStyle: the document's default paragraph style
+        return next(s for s in d.styles.element.findall(qn("w:style"))
+                    if s.get(qn("w:type")) == "paragraph" and s.get(qn("w:default")) in ("1", "true"))
+    return next(s for s in d.styles.element.findall(qn("w:style")) if s.get(qn("w:styleId")) == ps.get(qn("w:val")))
+
+
+def test_same_named_styles_keep_each_documents_look(work):
+    """Halil's midterm: two Word files from Word's PDF import both have 'Body Text' — 19.5 pt Arial in the first,
+    Times in the second. The second came out in big Arial (docxcompose keeps the first definition by name).
+    Now each part's styles are its own, and its plain paragraphs don't take the first file's Normal either."""
+    from docx.oxml.ns import qn
+    a = _styled_docx(work / "1 bolum.docx", "Arial", 19.5, "Birinci belge", indent=True)
+    b = _styled_docx(work / "2 cozum.docx", "Times New Roman", 11, "İkinci belge")
+    out = officetools.merge_to_word([a, b], noop, ordered=True)[0]
+    first, second = _style_of(out, "Birinci belge"), _style_of(out, "İkinci belge")
+    font = lambda s: s.find(f"{qn('w:rPr')}/{qn('w:rFonts')}").get(qn("w:ascii"))           # noqa: E731
+    size = lambda s: s.find(f"{qn('w:rPr')}/{qn('w:sz')}").get(qn("w:val"))                  # noqa: E731
+    assert (font(first), size(first)) == ("Arial", "39")             # control: the first file is untouched
+    assert (font(second), size(second)) == ("Times New Roman", "22")
+    # the second file's plain paragraph: its own Normal, not the first file's 1.25 cm first-line indent
+    plain = _style_of(out, "İkinci belge (Normal)")
+    assert plain.get(qn("w:styleId")) != _style_of(out, "Birinci belge (Normal)").get(qn("w:styleId"))
+    assert all(el.get(qn("w:firstLine")) in (None, "0") for el in plain.iter(qn("w:ind")))
+    import docx
+    names = [s.name for s in docx.Document(str(out)).styles]
+    assert len(names) == len(set(names))                             # Word wants unique style names
+
+
+def test_each_document_keeps_its_own_header(work):
+    """The midterm's university logo was in its header; merged after a file without a header it was gone (and a
+    header of the first file would have run on over every other file). Now: each its own; none → none."""
+    from PIL import Image
+    from docx.oxml.ns import qn
+    import docx
+    logo = work.parent / "logo.png"
+    Image.new("RGB", (120, 120), (200, 30, 30)).save(logo)
+    a = _styled_docx(work / "1 a.docx", "Arial", 12, "Başlıksız belge")
+    b = _styled_docx(work / "2 b.docx", "Times New Roman", 11, "Logolu belge", header="SINAV BAŞLIĞI", logo=logo)
+    c = _styled_docx(work / "3 c.docx", "Arial", 11, "Yine başlıksız")
+    out = officetools.merge_to_word([a, b, c], noop, ordered=True)[0]
+    d = docx.Document(str(out))
+    headers = [(s.header.is_linked_to_previous, " ".join(p.text for p in s.header.paragraphs).strip(),
+                len(s.header._element.findall(f".//{qn('a:blip')}"))) for s in d.sections]
+    assert len(headers) == 3, headers
+    assert headers[1] == (False, "SINAV BAŞLIĞI", 1)
+    assert headers[2][0] is False and headers[2][1] == ""             # c doesn't inherit b's header
+    blip = d.sections[1].header._element.find(f".//{qn('a:blip')}")
+    assert d.sections[1].header.part.related_parts[blip.get(qn("r:embed"))].blob[:4] == b"\x89PNG"
+
+
+@needs_soffice
+def test_header_shows_only_on_its_own_pages(work):
+    a = _styled_docx(work / "1 a.docx", "Arial", 12, "Başlıksız belge")
+    b = _styled_docx(work / "2 b.docx", "Times New Roman", 11, "Logolu belge", header="SINAV BAŞLIĞI")
+    c = _styled_docx(work / "3 c.docx", "Arial", 11, "Yine başlıksız")
+    out = officetools.merge_to_word([a, b, c], noop, ordered=True)[0]
+    outdir = work.parent / "render"
+    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(outdir), str(out)],
+                   capture_output=True, timeout=240)
+    texts = [p.get_text() for p in pymupdf.open(outdir / f"{out.stem}.pdf")]
+    assert len(texts) == 3
+    assert ["SINAV BAŞLIĞI" in t for t in texts] == [False, True, False]
+
+
 # ---------------------------------------------------------------- order window + main + history
 
 def test_main_word_choice(cfg, work, monkeypatch):
