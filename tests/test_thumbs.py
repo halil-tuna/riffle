@@ -119,3 +119,28 @@ def test_nothing_written(tmp_path, monkeypatch, images):
     assert sorted(p.name for p in src.iterdir()) == before and not list(work.iterdir())
     assert not {n for n in set(os.listdir(tempfile.gettempdir())) - tmp_before if "riffle" in n.lower()
                 or n.lower().endswith((".png", ".jpg"))}
+
+
+def test_pdf_preview_is_crisper_than_a_plain_render(tmp_path):
+    """Supersampled + sharpened: text lines keep more contrast than drawing the page straight at thumbnail size."""
+    import pymupdf
+    pdf = make_text_pdf(tmp_path / "net.pdf", pages=1)
+    new = thumbs.preview(pdf, 144).convert("L")
+    with pymupdf.open(pdf) as d:
+        p = d[0]
+        z = 144 / max(p.rect.width, p.rect.height)
+        pix = p.get_pixmap(matrix=pymupdf.Matrix(z, z), alpha=False)
+        plain = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+    assert new.size == plain.size
+
+    def darkest(im, share=0.02):                     # mean of the darkest 2 % (the text strokes)
+        hist, need, total = im.histogram(), max(1, int(im.width * im.height * share)), 0
+        got = 0
+        for value, n in enumerate(hist):
+            take = min(n, need - got)
+            total += value * take
+            got += take
+            if got >= need:
+                break
+        return total / need
+    assert darkest(new) < darkest(plain) - 3

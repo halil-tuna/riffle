@@ -563,7 +563,7 @@ def _save_view(view: str) -> None:
 
 # ------------------------------------------------------------------ icon view
 
-CARD_W, CARD_H, THUMB, HEAD_H, PAD = 152, 204, 120, 34, 12
+CARD_W, CARD_H, THUMB, HEAD_H, PAD = 172, 228, 144, 34, 12
 CACHE = 400                      # previews kept in memory (never on disk)
 
 

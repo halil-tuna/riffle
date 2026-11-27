@@ -17,7 +17,8 @@ import os
 import sys
 from pathlib import Path
 
-SIZE = 128
+SIZE = 144
+SUPERSAMPLE = 3                  # PDF pages are drawn 3× larger and scaled down: crisper text and lines
 
 KINDS = {
     "pdf": ("pdf",),
@@ -69,9 +70,12 @@ def _pdf(p: Path, size: int):
             return None
         page = doc[0]
         r = page.rect
-        zoom = size / max(r.width, r.height, 1)
+        zoom = size * SUPERSAMPLE / max(r.width, r.height, 1)
         pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
-        return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    w, h = im.size
+    im = im.resize((max(1, round(w / SUPERSAMPLE)), max(1, round(h / SUPERSAMPLE))), Image.LANCZOS)
+    return _sharpen(im)
 
 
 def _image(p: Path, size: int):
@@ -85,8 +89,9 @@ def _image(p: Path, size: int):
     with Image.open(p) as im:
         im.draft("RGB", (size * 2, size * 2))           # JPEG: decode at a smaller scale (much faster)
         im = ImageOps.exif_transpose(im)
-        im.thumbnail((size, size))
-        return im.convert("RGBA") if im.mode in ("RGBA", "LA", "P") else im.convert("RGB")
+        im.thumbnail((size, size), Image.LANCZOS)
+        im = im.convert("RGBA") if im.mode in ("RGBA", "LA", "P") else im.convert("RGB")
+        return _sharpen(im)
 
 
 def _shell(p: Path, size: int):
@@ -124,8 +129,8 @@ def _shell(p: Path, size: int):
     release = WINFUNCTYPE(ctypes.c_ulong, c_void_p)(vtbl[2])
     get_image = WINFUNCTYPE(ctypes.HRESULT, c_void_p, SIZE_, ctypes.c_int, POINTER(wintypes.HBITMAP))(vtbl[3])
     hbmp = wintypes.HBITMAP()
-    try:
-        get_image(factory, SIZE_(size, size), 0, byref(hbmp))      # SIIGBF_RESIZETOFIT: thumbnail, else icon
+    try:                                                # asked 2× larger, scaled down here (crisper)
+        get_image(factory, SIZE_(size * 2, size * 2), 0, byref(hbmp))   # SIIGBF_RESIZETOFIT: thumbnail, else icon
     finally:
         release(factory)
     try:
@@ -145,9 +150,22 @@ def _shell(p: Path, size: int):
         im = Image.frombuffer("RGBA", (w, h), buf.raw, "raw", "BGRA", 0, 1)
         if im.getchannel("A").getextrema()[1] == 0:        # thumbnails often come without alpha: opaque
             im = im.convert("RGB")
-        return im.copy()
+        im = im.copy()
+        if max(im.size) > size:
+            im.thumbnail((size, size), Image.LANCZOS)
+            im = _sharpen(im)
+        return im
     finally:
         gdi32.DeleteObject(hbmp)
+
+
+def _sharpen(im):
+    """A light unsharp mask after scaling down (Windows enlarges the window at 125-150 % display scaling,
+    which softens it again)."""
+    from PIL import ImageFilter
+    if im.mode not in ("RGB", "RGBA", "L"):
+        return im
+    return im.filter(ImageFilter.UnsharpMask(radius=0.8, percent=70, threshold=1))
 
 
 def com_init() -> None:
