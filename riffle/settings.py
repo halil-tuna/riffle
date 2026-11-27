@@ -151,7 +151,32 @@ def output_target(s: dict | None = None, ask=None) -> Path | None:
 
 # ------------------------------------------------------------------ pencere
 
-def run(paths=None, progress=print, **_) -> list:
+TABS = ("history", "general", "menu")
+
+
+def _single_instance():
+    """The open Riffle window, if there is one, comes to the front instead of a second window.
+    Returns (instance or None, already_open). Never raises."""
+    try:
+        from .single_instance import Instance
+        inst = Instance(_dir())
+        return (inst, False) if inst.acquire() else (inst, True)
+    except Exception:
+        return None, False
+
+
+def run(paths=None, progress=print, tab: str | None = None, **_) -> list:
+    """The Riffle window. Tabs: History · General · Right-click menu (tab: 'history' | 'general' | 'menu').
+    Opened from the Start menu (--app → History) and from the right-click 'Settings…' (→ General)."""
+    tab = tab if tab in TABS else "general"
+    inst, already_open = _single_instance()
+    if already_open:
+        try:
+            inst.request(tab)
+            return []
+        except Exception:
+            pass                                # could not reach it: open a window after all
+
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     from .actions import ACTIONS
@@ -159,19 +184,29 @@ def run(paths=None, progress=print, **_) -> list:
     s = load()
     use = usage()
     root = tk.Tk()
-    root.title(T("{0} — Ayarlar", APP_NAME))
-    root.geometry(f"720x{min(780, root.winfo_screenheight() - 80)}")
+    root.title(APP_NAME)
+    root.geometry(f"880x{min(800, root.winfo_screenheight() - 80)}")
+    root.minsize(720, 560)
     from . import theme
     pal = theme.setup(root)
-    ttk.Label(root, text=T("Ayarlar"), style="Heading.TLabel", padding=(20, 16, 20, 4)).pack(anchor="w")
     nb = ttk.Notebook(root)
-    nb.pack(fill="both", expand=True, padx=16, pady=(6, 10))
+    nb.pack(fill="both", expand=True, padx=16, pady=(14, 10))
+    frames: dict = {}
+    hist_tab = None
+    try:                                         # guarded add-on: without it the window opens as before
+        from . import history_ui
+        hist_tab = history_ui.build_tab(nb, root, pal)
+        frames["history"] = hist_tab.frame
+    except Exception:
+        hist_tab = None
     gen = ttk.Frame(nb, padding=(16, 14))
     nb.add(gen, text=T("Genel"))
+    frames["general"] = gen
 
     # --- Menu tab
     menu_tab = ttk.Frame(nb, padding=(16, 12))
     nb.add(menu_tab, text=T("Sağ tık menüsü"))
+    frames["menu"] = menu_tab
     ttk.Label(menu_tab, text=T("Göster: menüde görünsün · Üstte: menünün en başına sabitle"),
               style="Muted.TLabel").pack(anchor="w")
     auto = tk.BooleanVar(value=s["auto_favorites"])
@@ -265,6 +300,32 @@ def run(paths=None, progress=print, **_) -> list:
     ttk.Checkbutton(gen, text=T("Çok dosya seçince işlemcinin bütün çekirdeklerini kullan (daha hızlı)"),
                     variable=par).pack(anchor="w")
     ttk.Separator(gen).pack(fill="x", pady=14)
+    ttk.Label(gen, text=T("Gizlilik"), style="Strong.TLabel").pack(anchor="w", pady=(0, 4))
+    hist_on = tk.BooleanVar(value=bool(s.get("history", True)))
+    ttk.Checkbutton(gen, text=T("İşlem geçmişini kaydet (yalnızca bu bilgisayarda; dosyaların kopyası tutulmaz)"),
+                    variable=hist_on).pack(anchor="w")
+    hrow = ttk.Frame(gen)
+    hrow.pack(anchor="w", pady=(6, 0))
+    day_choices = {T("{0} gün", d): d for d in sorted({30, 90, 365, int(s.get("history_days") or 90)})}
+    days_var = tk.StringVar(value=next(k for k, v in day_choices.items() if v == int(s.get("history_days") or 90)))
+    ttk.Label(hrow, text=T("Sakla:")).pack(side="left")
+    ttk.Combobox(hrow, textvariable=days_var, values=list(day_choices), state="readonly", width=10).pack(
+        side="left", padx=6)
+    ttk.Label(hrow, text=T("· en fazla {0} işlem", 1000), style="Muted.TLabel").pack(side="left", padx=(0, 16))
+
+    def clear_history():
+        if not messagebox.askyesno(APP_NAME, T("Bütün geçmiş kayıtları silinsin mi? Dosyaların kendisine "
+                                               "dokunulmaz."), parent=root):
+            return
+        try:
+            from . import history
+            history.clear()
+        except Exception:
+            pass
+        if hist_tab is not None:
+            hist_tab.refresh()
+    ttk.Button(hrow, text=T("Geçmişi temizle"), command=clear_history).pack(side="left")
+    ttk.Separator(gen).pack(fill="x", pady=14)
     from . import __version__, update
     ttk.Label(gen, text=T("Güncellemeler · şu anki sürüm {0}", __version__), style="Strong.TLabel").pack(
         anchor="w", pady=(0, 4))
@@ -311,10 +372,17 @@ def run(paths=None, progress=print, **_) -> list:
         s["check_updates"] = upd.get()
         s["theme"] = look.get()
         s["language"] = lang_var.get()
+        s["history"] = hist_on.get()
+        s["history_days"] = day_choices.get(days_var.get(), 90)
         if s["output"] == "folder" and not Path(s["output_dir"]).is_dir():
             messagebox.showerror(APP_NAME, T("Seçilen çıktı klasörü bulunamadı."), parent=root)
             return
         save(s)
+        if hist_tab is not None:
+            try:
+                hist_tab.refresh()                # "History is off" note / records past the new limit
+            except Exception:
+                pass
         from . import i18n
         i18n.set_lang(None)                    # write the menus in the new language
         try:
@@ -327,8 +395,54 @@ def run(paths=None, progress=print, **_) -> list:
 
     ttk.Button(foot, text=T("Kaydet"), style="Accent.TButton", width=12, command=do_save).pack(side="right")
     root.bind("<Control-s>", lambda e: (do_save(), "break")[1])
+
+    def on_tab(_e=None):
+        """The Save bar belongs to the settings tabs; the History tab acts at once."""
+        try:
+            on_history = hist_tab is not None and nb.select() == str(hist_tab.frame)
+        except Exception:
+            on_history = False
+        if on_history:
+            foot.pack_forget()
+        elif not foot.winfo_ismapped():
+            foot.pack(fill="x")
+    nb.bind("<<NotebookTabChanged>>", on_tab, add="+")
+
+    def show(name):
+        frame = frames.get(name) or frames.get("general")
+        try:
+            nb.select(frame)
+        except Exception:
+            pass
+        on_tab()
+    show(tab)
+
+    def poll():
+        """A second start asked for this window: come to the front, on the tab it asked for."""
+        try:
+            asked = inst.poll()
+        except Exception:
+            asked = None
+        if asked is not None:
+            root.deiconify()
+            root.lift()
+            root.attributes("-topmost", True)
+            root.after(300, lambda: root.attributes("-topmost", False))
+            root.focus_force()
+            if asked in TABS:
+                show(asked)
+            if hist_tab is not None:
+                hist_tab.refresh()
+        root.after(400, poll)
+    if inst is not None:
+        root.after(400, poll)
+
     autoclose = os.environ.get("RIFFLE_AUTOCLOSE_MS")
     if autoclose:
         root.after(int(autoclose), root.destroy)
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        if inst is not None:
+            inst.release()
     return []

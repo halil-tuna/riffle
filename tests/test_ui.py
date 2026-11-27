@@ -382,7 +382,7 @@ def test_settings_window_saves(tmp_path):
     env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="12000", XDG_CONFIG_HOME=str(cfg))
     p = subprocess.Popen([sys.executable, str(RUN), "--settings"], env=env,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    win = _window("Ayarlar")
+    win = _window("^Riffle$")
     assert win
     time.sleep(1.5)
     _xdo("windowfocus", "--sync", win)

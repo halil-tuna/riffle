@@ -4,6 +4,7 @@ Usage:
     python run.pyw <action> <file1> [file2 ...]
     python run.pyw --list            # list the actions
     python run.pyw --settings        # settings window
+    python run.pyw --app             # the Riffle window, History tab (Start menu)
     Riffle.exe --install-menu / --uninstall-menu / --check   (packaged version)
 
 The right-click menu calls this command.
@@ -54,9 +55,10 @@ def main(argv: list[str] | None = None) -> int:
         from . import __version__
         print(__version__)
         return 0
-    if argv[0] == "--settings":
+    if argv[0] in ("--settings", "--app"):
+        # --app: the Riffle window from the Start menu, History tab first; --settings: the General tab
         from .settings import run as settings_window
-        settings_window()
+        settings_window(tab="history" if argv[0] == "--app" else "general")
         return 0
     if argv[0] == "--list":
         for a in ACTIONS:
