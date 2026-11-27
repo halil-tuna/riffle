@@ -24,6 +24,7 @@ import tempfile as _tf  # noqa: E402
 os.environ.setdefault("XDG_CONFIG_HOME", _tf.mkdtemp(prefix="riffle_test_cfg_"))
 os.environ.setdefault("RIFFLE_NO_MENU_REFRESH", "1")
 os.environ.setdefault("RIFFLE_NO_UPDATE_CHECK", "1")   # tests must not go online
+os.environ.setdefault("RIFFLE_NO_WELCOME", "1")        # the first-run window is tested on its own (test_welcome.py)
 os.environ.setdefault("RIFFLE_LANG", "tr")             # expected strings are Turkish (English in separate tests)
 
 FONT = _font_file()

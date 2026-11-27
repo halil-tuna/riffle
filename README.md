@@ -47,6 +47,10 @@ Your files never leave your computer.
 - **Fast** — Office files are converted in a single LibreOffice call with a persistent profile; large jobs use
   every CPU core; long PDF → Word conversions are split into page chunks and run in parallel. Every job can be
   cancelled without leaving half-written files.
+- **History** — Riffle remembers what you converted, when, and where the output went (*Riffle* in the Start
+  menu → History). Search, filter, double-click to open the output, *Show in folder*, *Convert again* (same
+  tool, same files). Kept only on this computer, no copies of your files, deleted after 90 days; asked once on
+  first use, can be turned off or cleared in Settings. Passwords are never stored.
 - **Native look** — Windows 11 style (Sun Valley theme), follows the system light/dark mode, dark title bar.
 - **Update notice** — once a week Riffle asks GitHub for the latest version number (nothing else is sent) and
   shows a link when a newer release exists; can be turned off in Settings.
@@ -56,6 +60,7 @@ Your files never leave your computer.
 | ![Merge order](docs/screenshots/en/order.png) | ![Done](docs/screenshots/en/done.png) |
 | ![Signature and stamps](docs/screenshots/en/stamp.png) | ![Folder search](docs/screenshots/en/search.png) |
 | ![Settings, dark mode](docs/screenshots/en/settings-dark.png) | ![Organizer, dark mode](docs/screenshots/en/organizer-dark.png) |
+| ![History](docs/screenshots/en/history.png) | ![First start](docs/screenshots/en/welcome.png) |
 
 ## Install
 
@@ -63,7 +68,8 @@ Your files never leave your computer.
 
 Download `Riffle-<version>-setup.exe` from **[Releases](https://github.com/halil-tuna/riffle/releases)**
 and run it (no admin rights needed). The context-menu entries are added automatically and removed on
-uninstall. On Windows 11 they are under **Show more options** (Shift+F10).
+uninstall. On Windows 11 they are under **Show more options** (Shift+F10). **Riffle** in the Start menu
+opens your history and the settings (pin it to the taskbar if you like; a desktop shortcut is optional).
 
 Optional components (links on the last installer page):
 [LibreOffice](https://www.libreoffice.org/download) for Word/Excel/PowerPoint → PDF,
@@ -95,6 +101,7 @@ python run.pyw compress report.pdf
 python run.pyw merge a.pdf b.pdf c.pdf
 python run.pyw pdf2word paper.pdf
 python run.pyw --settings
+python run.pyw --app                     # the Riffle window: history + settings
 Riffle.exe --install-menu | --uninstall-menu | --check | --version
 ```
 
@@ -115,7 +122,9 @@ riffle/officetools.py   Office shrink, Word merge, CSV → Excel, slide handouts
 riffle/imagetools.py    image OCR, target size, PNG, rotate
 riffle/update.py        weekly update notice (GitHub Releases)
 riffle/forms.py         form filling        riffle/search.py   folder search
-riffle/settings.py      settings, favourites, output folder, appearance
+riffle/settings.py      the Riffle window: settings, favourites, output folder, appearance
+riffle/history*.py      job history (local SQLite, guarded so it can never break a conversion) + History tab
+riffle/welcome.py       first-run window     riffle/single_instance.py   one Riffle window at a time
 riffle/i18n.py          languages: T("…") wrapper, system-language detection, setting
 riffle/i18n_en.py       English catalogue (source strings are Turkish; tests/i18n_scan.py lists missing ones)
 riffle/theme.py         shared look: Windows 11 theme, light/dark, colours, icon

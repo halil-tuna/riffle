@@ -21,7 +21,8 @@ from .i18n import T
 warnings.filterwarnings("ignore")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, _replay: dict | None = None) -> int:
+    """_replay: options of a job run again from the History tab (--again): previous answers are offered again."""
     argv = list(sys.argv[1:] if argv is None else argv)
 
     # no stdout/stderr when running under pythonw; keep prints from crashing
@@ -57,9 +58,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] in ("--settings", "--app"):
         # --app: the Riffle window from the Start menu, History tab first; --settings: the General tab
+        if argv[0] == "--app":
+            _welcome()
         from .settings import run as settings_window
         settings_window(tab="history" if argv[0] == "--app" else "general")
         return 0
+    if argv[0] == "--again":
+        # "Convert again" from the History tab: the same action on the same files
+        again = _again_args(argv[1:2])
+        if again is None:
+            from . import ui
+            ui.notify(T("Hata"), T("Bu işlem geçmişte bulunamadı."))
+            return 1
+        return main(again[0], _replay=again[1])
     if argv[0] == "--list":
         for a in ACTIONS:
             print(f"{a.id:12} {T(a.label):28} {', '.join(T(e) if e.startswith('<') else e for e in a.extensions)}")
@@ -72,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     from .collect import collect
-    collected = collect(action_id, raw_paths)
+    collected = raw_paths if _replay is not None else collect(action_id, raw_paths)
     if collected is None:
         return 0  # another process is collecting this job
 
@@ -89,13 +100,17 @@ def main(argv: list[str] | None = None) -> int:
     if not paths:
         ui.notify(T("Uygun dosya yok"), ", ".join(skipped))
         return 1
+    if action.id != "settings" and _replay is None:
+        _welcome()                       # once: history on/off + where outputs go (before the output setting)
+    replay = _replay or {}
 
     kwargs = dict(action.kwargs)
     if action.order and len(paths) > 1:
         # a small, fast file order window first; the pages are opened only if asked
         from .actions import sorted_by_name
         ok_text = T("Birleştir") if action.quick or action.id in ("merge", "wordmerge") else T("Tamam")
-        answer = ui.ask_order(sorted_by_name(paths), T(action.label), T(action.order), ok_text,
+        start = paths if replay.get("ordered") else sorted_by_name(paths)     # again: the order used last time
+        answer = ui.ask_order(start, T(action.label), T(action.order), ok_text,
                               allow_pages=action.id != "wordmerge")     # Word merging should not go to PDF
         if answer is None:
             return 1                     # Cancel
@@ -103,10 +118,11 @@ def main(argv: list[str] | None = None) -> int:
         if mode == "organize":           # "Edit page by page…": the organizer, in the chosen order
             from .tools import organize
             try:
-                organize(paths, print)
+                saved = organize(paths, print)
             except ConversionError as e:
                 ui.notify(T("Hata"), str(e))
                 return 1
+            _record_window(action.id, paths, saved, {})
             return 0
         kwargs["ordered"] = True
         if action.quick:                 # merge directly instead of the organizer
@@ -118,7 +134,9 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["password"] = pw
     if action.ask:
         key, question, default = action.ask
-        answer = ui.ask_text(T(question), T(default) if default else default)
+        previous = replay.get(key)                     # again: last time's answer is offered
+        answer = ui.ask_text(T(question), str(previous) if previous not in (None, "") else
+                             T(default) if default else default)
         if answer is None:
             return 1
         kwargs[key] = answer
@@ -134,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
         except ConversionError as e:
             ui.notify(T("Hata"), str(e))
             return 1
+        if action.id not in ("search", "settings"):
+            _record_window(action.id, paths, outputs, kwargs)
         _count_use(action.id, settings)
         return 0
 
@@ -208,6 +228,37 @@ def _apply_output_setting(paths, settings, ui) -> None:
             actions.OUTPUT_REDIRECT[Path(p).resolve().parent] = target
         except OSError:
             pass
+
+
+def _welcome() -> None:
+    """First-run window (welcome.py) — guarded: whatever happens there, the job goes on."""
+    try:
+        from . import welcome
+        welcome.maybe_show()
+    except Exception:
+        pass
+
+
+def _again_args(arg: list[str]):
+    """--again <job id> → ([action_id, *inputs], options) from the history, or None."""
+    try:
+        from . import history
+        job = history.get(int(arg[0]))
+        if job is None:
+            return None
+        return [job["action_id"], *job["inputs"]], job["options"]
+    except Exception:
+        return None
+
+
+def _record_window(action_id: str, paths, outputs, kwargs) -> None:
+    """The windows that save by themselves (page organizer, signature, form): one record if something was saved."""
+    try:
+        if outputs:
+            from . import history
+            history.record(action_id, paths, outputs, options=kwargs)
+    except Exception:
+        pass
 
 
 class _NoHistory:

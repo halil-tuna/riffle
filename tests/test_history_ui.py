@@ -412,3 +412,95 @@ def test_single_window(cfg):
         assert _wait(lambda: len(_windows("^Riffle$")) == 1)
     finally:
         again.wait(timeout=30)
+
+
+# ---------------------------------------------------------------- stage 3: convert again, result window link
+
+@needs_display
+def test_again_button(tab, monkeypatch):
+    from tkinter import messagebox
+    launched, said = [], []
+    monkeypatch.setattr(history_ui, "launch", lambda *a: launched.append(a))
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: said.append(a[1]))
+    tab.select(tab.ids["word"])
+    assert "disabled" not in tab.b_again.state()
+    tab.again_selected()
+    assert launched == [("--again", str(tab.ids["word"]))]
+    Path(tab.jobs[tab.ids["merge"]]["inputs"][2]).unlink()        # one source gone
+    tab.select(tab.ids["merge"])
+    tab.again_selected()
+    assert len(launched) == 1 and "b2.pdf" in said[0]
+
+
+@needs_display
+def test_again_disabled_for_unknown_action(tab):
+    jid = history.record("eski_bir_islem", ["/x/a.pdf"], [])
+    tab.refresh()
+    tab.select(jid)
+    assert "disabled" in tab.b_again.state()
+
+
+def test_riffle_command():
+    cmd = history_ui.riffle_command()
+    assert cmd[0] == sys.executable and cmd[1].endswith("run.pyw") and Path(cmd[1]).exists()
+
+
+@needs_display
+def test_result_window_history_link(cfg, tmp_path, monkeypatch):
+    from tkinter import ttk
+    from riffle import ui
+    launched, seen = [], {}
+    monkeypatch.setattr(history_ui, "launch", lambda *a: launched.append(a))
+    out = tmp_path / "cikti.pdf"
+    out.write_bytes(b"%PDF")
+    real_tk = tk.Tk
+
+    class Probe(real_tk):
+        def mainloop(self, n=0):
+            def look():
+                links = [w for w in _all(self) if isinstance(w, ttk.Label) and w.cget("text") == "Geçmiş"]
+                if not links:
+                    self.after(200, look)
+                    return
+                seen["link"] = True
+                links[0].event_generate("<Button-1>")
+            self.after(200, look)
+            super().mainloop(n)
+    monkeypatch.setattr(tk, "Tk", Probe)
+    ui.run_with_window("deneme", lambda progress: ([out], []))
+    assert seen == {"link": True} and launched == [("--app",)]
+
+
+@needs_display
+def test_result_window_no_link_when_off(cfg, tmp_path, monkeypatch):
+    from tkinter import ttk
+    from riffle import ui
+    _set(history=False)
+    seen = {}
+    real_tk = tk.Tk
+
+    class Probe(real_tk):
+        def mainloop(self, n=0):
+            def look():
+                labels = [w.cget("text") for w in _all(self) if isinstance(w, ttk.Label)]
+                if not any("Tamamlandı" in str(t) for t in labels):
+                    self.after(200, look)
+                    return
+                seen["labels"] = labels
+                self.destroy()
+            self.after(200, look)
+            super().mainloop(n)
+    monkeypatch.setattr(tk, "Tk", Probe)
+    out = tmp_path / "cikti.pdf"
+    out.write_bytes(b"%PDF")
+    ui.run_with_window("deneme", lambda progress: ([out], []))
+    assert "Geçmiş" not in seen["labels"]
+
+
+def _all(root):
+    out, stack = [], [root]
+    while stack:
+        w = stack.pop()
+        stack.extend(w.winfo_children())
+        out.append(w)
+    return out

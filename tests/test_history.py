@@ -427,3 +427,95 @@ def test_broken_history_does_not_change_conversions(cfg, tmp_path, monkeypatch, 
         broken = _run_case(tmp_path / "bozuk", mp, action, n, parallel_on)
     assert broken == reference
     assert history.count() == recorded                     # the broken history really did not record
+
+
+# ---------------------------------------------------------------- stage 3: windows that save by themselves, again
+
+def test_get_one(cfg):
+    a = history.record("rotate", ["/x/a.pdf"], ["/x/b.pdf"], options={"angle": 90})
+    history.record("merge", ["/x/c.pdf"], [])
+    j = history.get(a)
+    assert j["action_id"] == "rotate" and j["inputs"] == ["/x/a.pdf"] and j["options"] == {"angle": 90}
+    assert history.get(999) is None
+
+
+def test_interactive_windows_record(cfg, tmp_path, monkeypatch):
+    from riffle import main as main_mod
+    from riffle.actions import BY_ID
+    src = make_text_pdf(tmp_path / "imza.pdf", pages=1, table=False)
+    out = tmp_path / "imza_imzali.pdf"
+    monkeypatch.setattr(BY_ID["sign"], "func", lambda paths, progress, **k: [out])
+    main_mod.main(["sign", str(src)])
+    j = history.query()[0]
+    assert j["action_id"] == "sign" and j["outputs"] == [str(out)] and j["status"] == "ok"
+    monkeypatch.setattr(BY_ID["form"], "func", lambda paths, progress, **k: [])     # closed without saving
+    main_mod.main(["form", str(src)])
+    monkeypatch.setattr(BY_ID["search"], "func", lambda paths, progress, **k: [tmp_path])
+    main_mod.main(["search", str(tmp_path)])
+    assert history.count() == 1
+
+
+def test_organizer_from_order_window_records(cfg, tmp_path, monkeypatch):
+    from riffle import main as main_mod
+    from riffle import tools, ui
+    files = [make_text_pdf(tmp_path / f"s{i}.pdf", pages=1, table=False) for i in range(2)]
+    out = tmp_path / "Birlesik.pdf"
+    monkeypatch.setattr(ui, "ask_order", lambda paths, *a, **k: ("organize", list(reversed(paths))))
+    monkeypatch.setattr(tools, "organize", lambda paths, progress, **k: [out])
+    main_mod.main(["organize", *map(str, files)])
+    j = history.query()[0]
+    assert j["action_id"] == "organize" and j["inputs"] == [str(files[1]), str(files[0])]
+    assert j["outputs"] == [str(out)]
+
+
+def test_again_runs_the_same_job(cfg, tmp_path, monkeypatch):
+    from riffle import main as main_mod
+    _set(parallel=False)
+    src = make_text_pdf(tmp_path / "tekrar.pdf", pages=1, table=False)
+    seen = {}
+    _fake_window(monkeypatch, seen)
+    main_mod.main(["rotatel", str(src)])
+    first = history.query()[0]
+    assert main_mod.main(["--again", str(first["id"])]) == 0
+    jobs = history.query()
+    assert len(jobs) == 2 and jobs[0]["action_id"] == "rotatel" and jobs[0]["inputs"] == first["inputs"]
+    assert jobs[0]["options"] == {"angle": 270}
+    assert Path(jobs[0]["outputs"][0]).name != Path(first["outputs"][0]).name        # a new file, not overwritten
+    assert main_mod.main(["--again", "12345"]) == 1
+
+
+def test_again_offers_previous_answers(cfg, tmp_path, monkeypatch):
+    from riffle import main as main_mod
+    from riffle import ui
+    src = make_text_pdf(tmp_path / "filigran.pdf", pages=1, table=False)
+    jid = history.record("watermark", [src], [], options={"text": "GİZLİ"})
+    asked = []
+    monkeypatch.setattr(ui, "ask_text", lambda q, default="": (asked.append(default), None)[1])   # then Cancel
+    assert main_mod.main(["--again", str(jid)]) == 1
+    assert asked == ["GİZLİ"]
+    main_mod.main(["watermark", str(src)])                        # a normal run still offers the default
+    assert asked[-1] == "TASLAK"
+
+
+def test_again_never_has_the_password(cfg, tmp_path, monkeypatch):
+    from riffle import main as main_mod
+    from riffle import ui
+    src = make_text_pdf(tmp_path / "sifre.pdf", pages=1, table=False)
+    with history.Job("protect", [src], {"password": "çok-gizli"}):
+        pass
+    asked = []
+    monkeypatch.setattr(ui, "ask_password", lambda confirm=False: (asked.append(confirm), None)[1])
+    assert main_mod.main(["--again", str(history.query()[0]["id"])]) == 1
+    assert asked == [True]
+
+
+def test_again_keeps_the_order(cfg, tmp_path, monkeypatch):
+    from riffle import main as main_mod
+    from riffle import ui
+    files = [make_text_pdf(tmp_path / f"{n}.pdf", pages=1, table=False) for n in ("a", "b", "c")]
+    jid = history.record("merge", [files[2], files[0], files[1]], [], options={"ordered": True})
+    shown = []
+    monkeypatch.setattr(ui, "ask_order", lambda paths, *a, **k: (shown.append([p.name for p in paths]), None)[1])
+    main_mod.main(["--again", str(jid)])
+    main_mod.main(["merge", *map(str, files)])
+    assert shown == [["c.pdf", "a.pdf", "b.pdf"], ["a.pdf", "b.pdf", "c.pdf"]]

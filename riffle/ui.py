@@ -446,6 +446,15 @@ def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[lis
                              foreground=pal.accent, cursor="hand2")
             link.pack(anchor="w", pady=(10, 0))
             link.bind("<Button-1>", lambda e: update.open_download())
+        try:                                   # guarded add-on: the History link (Riffle window, History tab)
+            from . import history
+            if history.enabled():
+                from .history_ui import launch
+                hlink = ttk.Label(buttons, text=T("Geçmiş"), foreground=pal.accent, cursor="hand2")
+                hlink.pack(side="left")
+                hlink.bind("<Button-1>", lambda e: (launch("--app"), root.destroy()))
+        except Exception:
+            pass
         if outputs:
             ttk.Button(buttons, text=T("Klasörü aç"), style="Accent.TButton",
                        command=lambda: (open_folder(outputs[0]), root.destroy())).pack(side="right")

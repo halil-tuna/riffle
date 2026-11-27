@@ -41,6 +41,29 @@ def open_path(path) -> None:
         subprocess.Popen(["xdg-open", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def riffle_command() -> list[str]:
+    """How to start Riffle again: the .exe itself, or python + run.pyw for a source install."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, str(Path(__file__).resolve().parent.parent / "run.pyw")]
+
+
+def launch(*args: str) -> None:
+    """Starts Riffle in a new process (tests replace this)."""
+    kw = {"creationflags": getattr(subprocess, "DETACHED_PROCESS", 0)} if sys.platform == "win32" else \
+        {"start_new_session": True}
+    subprocess.Popen(riffle_command() + list(args), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     close_fds=True, **kw)
+
+
+def known_action(action_id: str) -> bool:
+    try:
+        from .actions import BY_ID
+        return action_id in BY_ID
+    except Exception:
+        return False
+
+
 def is_local(path: str) -> bool:
     """Network drives are not checked for existence (a slow or offline share would freeze the list)."""
     if sys.platform != "win32":
@@ -205,14 +228,16 @@ class HistoryTab:
         btns.pack(fill="x", pady=(8, 0))
         self.b_open = ttk.Button(btns, text=T("Aç"), command=self.open_selected)
         self.b_show = ttk.Button(btns, text=T("Klasörde göster"), command=self.show_selected)
+        self.b_again = ttk.Button(btns, text=T("Tekrar dönüştür"), command=self.again_selected)
         self.b_remove = ttk.Button(btns, text=T("Listeden kaldır"), command=self.remove_selected)
-        for b in (self.b_open, self.b_show, self.b_remove):
+        for b in (self.b_open, self.b_show, self.b_again, self.b_remove):
             b.pack(side="left", padx=(0, 8))
         ttk.Button(btns, text=T("Geçmişi temizle"), command=self.clear_all).pack(side="right")
 
         self.menu = tk.Menu(root, tearoff=0)
         self.menu.add_command(label=T("Aç"), command=self.open_selected)
         self.menu.add_command(label=T("Klasörde göster"), command=self.show_selected)
+        self.menu.add_command(label=T("Tekrar dönüştür"), command=self.again_selected)
         self.menu.add_separator()
         self.menu.add_command(label=T("Listeden kaldır"), command=self.remove_selected)
 
@@ -349,7 +374,7 @@ class HistoryTab:
         d = self.detail
         d.configure(state="normal")
         d.delete("1.0", "end")
-        for b in (self.b_open, self.b_show, self.b_remove):
+        for b in (self.b_open, self.b_show, self.b_again, self.b_remove):
             b.state(["!disabled"] if j else ["disabled"])
         if j:
             t = local_time(j["started_at"])
@@ -376,6 +401,7 @@ class HistoryTab:
         d.configure(state="disabled")
         if j:
             self.b_open.state(["!disabled"] if first_output(j, self._present_now) else ["disabled"])
+            self.b_again.state(["!disabled"] if j["inputs"] and known_action(j["action_id"]) else ["disabled"])
 
     # ---------------------------------------------------------- actions
 
@@ -426,6 +452,27 @@ class HistoryTab:
         if target:
             from . import ui
             ui.open_folder(Path(target))
+
+    def again_selected(self) -> None:
+        """Same action on the same files, in a new Riffle process (it asks again for anything it needs:
+        passwords always, earlier answers such as a page range are offered as the default)."""
+        from tkinter import messagebox
+        j = self.selected()
+        if not j or not j["inputs"]:
+            return
+        if not known_action(j["action_id"]):
+            messagebox.showinfo("Riffle", T("Bu işlem bu Riffle sürümünde yok."), parent=self.root)
+            return
+        missing = [p for p in j["inputs"] if not exists(p)]
+        if missing:
+            names = "\n".join(Path(p).name for p in missing[:10]) + ("\n…" if len(missing) > 10 else "")
+            messagebox.showinfo("Riffle", T("Kaynak dosya bulunamadı (taşınmış ya da silinmiş olabilir):\n{0}",
+                                            names), parent=self.root)
+            return
+        try:
+            launch("--again", str(j["id"]))
+        except Exception as e:
+            messagebox.showerror("Riffle", T("Açılamadı: {0}", e), parent=self.root)
 
     def remove_selected(self) -> None:
         jid = self.selected_id()

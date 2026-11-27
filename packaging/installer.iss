@@ -36,6 +36,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
 
 [CustomMessages]
+english.AppDesc=Riffle — history and settings
+turkish.AppDesc=Riffle — geçmiş ve ayarlar
 english.Organizer=Riffle — Page organizer
 turkish.Organizer=Riffle — Sayfa düzenleyici
 english.Uninstall=Uninstall Riffle
@@ -49,10 +51,17 @@ turkish.GetTesseract=Tesseract OCR'ı indir (taranmış PDF; kurarken Turkish'i 
 english.GetGhostscript=Download Ghostscript (for PDF/A)
 turkish.GetGhostscript=Ghostscript'i indir (PDF/A için)
 
+[Tasks]
+; optional desktop shortcut for the Riffle window (off by default); CreateDesktopIcon/AdditionalIcons come with Inno
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
 [Files]
 Source: "..\dist\Riffle\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
+; "Riffle" straight in the Start menu's app list (pin to Start / taskbar): the Riffle window, History tab first
+Name: "{autoprograms}\Riffle"; Filename: "{app}\Riffle.exe"; Parameters: "--app"; Comment: "{cm:AppDesc}"
+Name: "{autodesktop}\Riffle"; Filename: "{app}\Riffle.exe"; Parameters: "--app"; Comment: "{cm:AppDesc}"; Tasks: desktopicon
 Name: "{group}\{cm:Organizer}"; Filename: "{app}\Riffle.exe"; Parameters: "organize"
 Name: "{group}\{cm:Uninstall}"; Filename: "{uninstallexe}"
 
@@ -66,5 +75,5 @@ Filename: "https://ghostscript.com/releases/gsdnld.html"; Description: "{cm:GetG
 Filename: "{app}\Riffle.exe"; Parameters: "--uninstall-menu"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveMenu"
 
 [Messages]
-english.FinishedLabel=Setup is complete. Right-click a file and choose "Show more options" → "Riffle".
-turkish.FinishedLabel=Kurulum tamamlandı. Bir dosyaya sağ tıklayıp "Daha fazla seçenek göster" → "Riffle" menüsünü kullanabilirsin.
+english.FinishedLabel=Setup is complete. Right-click a file and choose "Show more options" → "Riffle". Your history and the settings: "Riffle" in the Start menu.
+turkish.FinishedLabel=Kurulum tamamlandı. Bir dosyaya sağ tıklayıp "Daha fazla seçenek göster" → "Riffle" menüsünü kullanabilirsin. Geçmiş ve ayarlar: Başlat menüsünde "Riffle".

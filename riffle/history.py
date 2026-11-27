@@ -431,12 +431,15 @@ def prune(days: int | None = None, path: Path | None = None) -> int:
 
 
 def query(search: str = "", action: str | None = None, status: str | None = None, limit: int = 200,
-          offset: int = 0, path: Path | None = None) -> list[dict]:
+          offset: int = 0, path: Path | None = None, job_id: int | None = None) -> list[dict]:
     """Newest first. search: part of a file name (in or out, case-insensitive)."""
     p = Path(path) if path else db_path()
     if not p.exists():
         return []
     where, args = [], []
+    if job_id is not None:
+        where.append("j.id = ?")
+        args.append(int(job_id))
     if action:
         where.append("j.action_id = ?")
         args.append(action)
@@ -466,6 +469,12 @@ def query(search: str = "", action: str | None = None, status: str | None = None
         return jobs
     finally:
         con.close()
+
+
+def get(job_id: int, path: Path | None = None) -> dict | None:
+    """One record (same shape as query())."""
+    found = query(job_id=job_id, limit=1, path=path)
+    return found[0] if found else None
 
 
 def remove(job_id: int, path: Path | None = None) -> bool:

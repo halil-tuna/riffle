@@ -111,6 +111,49 @@ def _sample_pdfs(work: Path, lang: str = "tr") -> dict:
     return out
 
 
+def _sample_history(work: Path, cfg: Path, s: dict, lang: str) -> None:
+    """A made-up history (sample file names only) for the History tab screenshot."""
+    from datetime import datetime, timedelta
+    old = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(cfg)
+    try:
+        from riffle import history
+        en = lang == "en"
+        now = datetime.now().astimezone()
+
+        def at(h, m, days=0):
+            return (now.replace(hour=h, minute=m, second=0) - timedelta(days=days)).isoformat(timespec="seconds")
+
+        def out(name):
+            p = work / name
+            p.write_bytes(b"sample")
+            return p
+        rep, art, notes = s["Rapor.pdf"], s["Makale.pdf"], s["Ders notu.pdf"]
+        history.record("compress", [art], [out(("Article" if en else "Makale") + " (1).pdf")],
+                       notes=[("info", f"{art.name}: 2.4 MB → 0.9 MB (%62)")], started_at=at(9, 12, 2),
+                       duration_ms=2100)
+        history.record("ocr", [notes], [work / ("Lecture notes_ocr.pdf" if en else "Ders notu_ocr.pdf")],
+                       started_at=at(21, 40, 1), duration_ms=48000)
+        history.record("merge", [rep, art, notes], [out("Merged.pdf" if en else "Birlesik.pdf")],
+                       options={"ordered": True}, started_at=at(13, 5), duration_ms=900)
+        history.record("pdf2word", [rep], [out(("Report" if en else "Rapor") + ".docx")],
+                       notes=[("info", f"{rep.name}: " + ("3 notes from the PDF were added as Word comments."
+                                                         if en else "PDF'teki 3 not Word yorumu olarak eklendi."))],
+                       started_at=at(14, 20), duration_ms=3400)
+    finally:
+        if old is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = old
+
+
+def _select_row(win: str) -> None:
+    """Selects the first job so the details show (the first row under the day heading)."""
+    subprocess.run(["xdotool", "windowfocus", "--sync", win], capture_output=True)
+    subprocess.run(["xdotool", "mousemove", "--window", win, "400", "178", "click", "1"], capture_output=True)
+    time.sleep(0.8)
+
+
 def _window(part: str, timeout: float = 25) -> str | None:
     end = time.time() + timeout
     while time.time() < end:
@@ -134,9 +177,10 @@ def capture(outdir: Path, dark: bool, lang: str = "tr") -> None:
     s = _sample_pdfs(work, lang)
     en = lang == "en"
     suffix = "-dark" if dark else ""
-    env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="60000", RIFFLE_NO_MENU_REFRESH="1",
+    env = dict(os.environ, RIFFLE_AUTOCLOSE_MS="60000", RIFFLE_NO_MENU_REFRESH="1", RIFFLE_NO_WELCOME="1",
                RIFFLE_THEME="dark" if dark else "light", RIFFLE_LANG=lang,
                XDG_CONFIG_HOME=str(work.parent / "cfg"))
+    _sample_history(work, Path(env["XDG_CONFIG_HOME"]), s, lang)
     run = [sys.executable, str(ROOT / "run.pyw")]
 
     def scene(name, args, title, wait=1.2, before=None, **extra):
@@ -161,7 +205,10 @@ def capture(outdir: Path, dark: bool, lang: str = "tr") -> None:
           RIFFLE_ORDER="organize")
     scene("stamp", ["sign", pdfs[0]], "Add sign" if en else " ekle ", wait=2.5)
     scene("form", ["form", str(s["form"])], "Fill in" if en else "Form doldur")
-    scene("settings", ["--settings"], "Settings" if en else "Ayarlar")
+    scene("settings", ["--settings"], "^Riffle$")
+    scene("history", ["--app"], "^Riffle$", wait=1.5, before=_select_row)
+    fresh = work.parent / "cfg-yeni"                       # a first start: the welcome window
+    scene("welcome", ["--app"], "^Riffle$", XDG_CONFIG_HOME=str(fresh), RIFFLE_NO_WELCOME="")
 
     def type_query(win):
         subprocess.run(["xdotool", "windowfocus", "--sync", win], capture_output=True)

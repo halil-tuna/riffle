@@ -155,9 +155,30 @@ Görseldeki yazıyı çıkar · JPG / PNG'ye çevir · Küçült · Hedef boyuta
 **Klasörler:** Klasörü tek PDF yap (yer imli) · Klasörde ara
 **Her menünün sonunda:** Ayarlar…
 
+### Geçmiş
+
+Riffle yaptığın işlemleri hatırlar: ne zaman neyi dönüştürdün, çıktı nereye gitti. Başlat menüsünde
+**Riffle**'ı aç (görev çubuğuna sabitleyebilirsin) → **Geçmiş** sekmesi.
+
+![Geçmiş](docs/screenshots/tr/history.png)
+
+- Güne göre liste (Bugün, Dün, tarih); dosya adıyla arama, işleme ve duruma (✓ ⚠ ✗ ⊘) göre süzme.
+- **Çift tık** çıktı dosyasını açar · *Klasörde göster* · **Tekrar dönüştür** (aynı araç, aynı dosyalar; sayfa
+  aralığı gibi önceki cevaplar hazır gelir, şifre her seferinde yeniden sorulur) · *Listeden kaldır*
+  (dosyaya dokunmaz) · *Geçmişi temizle*.
+- Ayrıntıda işlemin notları (ör. "3 not Word yorumu olarak eklendi"), hataları, Riffle sürümü ve süresi.
+  Taşınmış ya da silinmiş çıktılar soluk ve "(bulunamadı)" olarak görünür.
+- İş bitince sonuç penceresindeki **Geçmiş** bağlantısı da buraya açar.
+- **Gizlilik:** yalnızca bu bilgisayarda tutulur (`%APPDATA%\Riffle\gecmis.sqlite3`), dosyaların kopyası
+  alınmaz (sadece yol ve boyut), internete hiçbir şey gitmez, şifreler asla kaydedilmez, 90 gün sonra silinir.
+  İlk kullanımda bir kez sorulur (aynı pencerede çıktı yeri de seçilir); *Ayarlar → Genel → Gizlilik*'ten
+  kapatılır, süresi (30 / 90 / 365 gün) değiştirilir ya da temizlenir.
+- Geçmiş ayrı, korumalı bir modül: kaydedilemese (bozuk dosya, dolu disk) bile dönüştürme aynen biter.
+
 ### Ayarlar
 
-Herhangi bir dosyaya sağ tık → **Ayarlar…** (ya da `python run.pyw --settings`):
+Başlat menüsünde **Riffle** → *Genel* / *Sağ tık menüsü* sekmeleri, ya da herhangi bir dosyaya sağ tık →
+**Ayarlar…** (`python run.pyw --settings`):
 - **Dil:** sistem dili (Windows Türkçe değilse İngilizce) · Türkçe · English. Menüler hemen, pencereler bir
   sonraki açılışta değişir; çıktı dosya adları da dile göre (`_birlesik` / `_merged`).
 - **Görünüm:** sistemle aynı (Windows koyu temadaysa Riffle da koyu) · açık · koyu. Pencereler Windows 11
@@ -165,6 +186,7 @@ Herhangi bir dosyaya sağ tık → **Ayarlar…** (ya da `python run.pyw --setti
 - **Menüyü sadeleştir:** kullanmadığın araçları gizle; istediklerini en üste sabitle. En çok kullandığın
   3 işlem (en az 3 kez) kendiliğinden menünün en üstüne çıkar.
 - **Çıktı yeri:** kaynağın yanına (varsayılan) · Masaüstüne · seçtiğin klasöre · her seferinde sor.
+- **Gizlilik:** işlem geçmişini kaydet (açık/kapalı), saklama süresi, geçmişi temizle.
 - **Güncellemeler:** haftada bir GitHub'da yeni sürüm var mı diye bakılır (yalnızca sürüm numarası sorulur,
   hiçbir dosya ya da bilgi gönderilmez); varsa iş bitince ekranında "Yeni sürüm var" bağlantısı çıkar.
   Kapatılabilir; *Şimdi denetle* düğmesi de var.
@@ -261,6 +283,7 @@ python run.pyw compress rapor.pdf
 python run.pyw merge a.pdf b.pdf c.pdf
 python run.pyw extract rapor.pdf        # sayfa aralığını sorar
 python run.pyw compare v1.pdf v2.pdf
+python run.pyw --app                    # Riffle penceresi: geçmiş + ayarlar
 Riffle.exe --install-menu | --uninstall-menu | --check | --version
 ```
 
@@ -281,7 +304,11 @@ riffle/docops.py        karartma, karşılaştırma, kenar kırpma, Markdown, PD
 riffle/textfix.py       PDF metin onarımı (kayıp semboller, satır sonu tireleri, alt simge)
 riffle/forms.py         form doldurma penceresi
 riffle/search.py        klasörde arama
-riffle/settings.py      ayarlar, sık kullanılanlar, çıktı yeri, görünüm
+riffle/settings.py      Riffle penceresi: ayarlar, sık kullanılanlar, çıktı yeri, görünüm
+riffle/history.py       işlem geçmişi (yerel SQLite; korumalı, dönüştürmeyi asla bozmaz)
+riffle/history_ui.py    Geçmiş sekmesi
+riffle/welcome.py       ilk kullanım penceresi
+riffle/single_instance.py  aynı anda tek Riffle penceresi
 riffle/officetools.py   Office küçültme, Word birleştirme, CSV → Excel, not çıktısı, Office resimleri
 riffle/imagetools.py    görseldeki yazı (OCR), hedef boyut, PNG, döndürme
 riffle/update.py        yeni sürüm bildirimi (GitHub Releases)

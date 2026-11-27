@@ -533,4 +533,17 @@ CATALOG = {
     'Sakla:': 'Keep for:',
     '{0} gün': '{0} days',
     '· en fazla {0} işlem': '· at most {0} jobs',
+    'Tekrar dönüştür': 'Convert again',
+    'Bu işlem bu Riffle sürümünde yok.': 'This action is not in this version of Riffle.',
+    'Kaynak dosya bulunamadı (taşınmış ya da silinmiş olabilir):\n{0}':
+        'Source file not found (it may have been moved or deleted):\n{0}',
+    'Bu işlem geçmişte bulunamadı.': 'This job was not found in the history.',
+    # --- First-run window
+    "Riffle'a hoş geldin": 'Welcome to Riffle',
+    'İşlem geçmişini kaydet': 'Keep a job history',
+    "Ne zaman neyi dönüştürdüğünü Riffle penceresinde görürsün. Yalnızca bu bilgisayarda tutulur, dosyaların "
+    "kopyası alınmaz, {0} gün sonra silinir. Sonradan Ayarlar'dan değiştirilebilir.":
+        'You see what you converted and when in the Riffle window. Kept only on this computer, no copies of the '
+        'files are made, deleted after {0} days. You can change this later in Settings.',
+    'Başla': 'Start',
 }
