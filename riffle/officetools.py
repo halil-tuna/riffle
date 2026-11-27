@@ -390,13 +390,20 @@ def _compose_sections(parts: list[Path], out: Path, progress: Progress) -> None:
             continue
         src = src_sects[-1]
         for old in [c for c in dst if c.tag in keep or c.tag == qn("w:type")]:
-            dst.remove(old)                                     # (no w:type = next page)
+            dst.remove(old)
         for el in src:
-            if el.tag in keep:
+            if el.tag in keep or (el.tag == qn("w:type") and len(src_sects) > 1):
                 dst.append(deepcopy(el))
         _sort_children(dst, _SECTPR_ORDER)
-        # headers/footers: the part's inner sections came in as paragraphs, its last one is the body's now
         inner = body.findall(f"{qn('w:p')}/{qn('w:pPr')}/{qn('w:sectPr')}")[inner_before:]
+        # A section's type says how THAT section starts. Only the part's first section must start a new page
+        # (no w:type = next page); the others keep theirs. (Word's PDF import ends a page with 'continuous'
+        # sections: a 4-column figure, then the text below it — forced to 'next page', the midterm's last
+        # question jumped to a page of its own.)
+        first_sect = inner[0] if inner and len(inner) == len(src_sects) - 1 else dst
+        for old in first_sect.findall(qn("w:type")):
+            first_sect.remove(old)
+        # headers/footers: the part's inner sections came in as paragraphs, its last one is the body's now
         if len(inner) == len(src_sects) - 1:
             for i, (s_src, s_dst) in enumerate(zip(src_sects, inner + [dst])):
                 _carry_headers(master, doc, s_src, s_dst, first=i == 0)

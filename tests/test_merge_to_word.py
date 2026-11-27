@@ -314,6 +314,50 @@ def test_header_shows_only_on_its_own_pages(work):
     assert ["SINAV BAŞLIĞI" in t for t in texts] == [False, True, False]
 
 
+def _two_section_docx(path: Path, text: str) -> Path:
+    """Like Word's PDF import on a page with a multi-column figure: a 2-column section, then a CONTINUOUS
+    section with the text below it — all on one page."""
+    import docx
+    from docx.enum.section import WD_SECTION
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    w = docx.Document()
+    w.add_paragraph(f"{text}: şekil sütunu")
+    w.sections[0]._sectPr.append(parse_xml(f'<w:cols {nsdecls("w")} w:num="2"/>'))
+    w.add_section(WD_SECTION.CONTINUOUS)
+    w.add_paragraph(f"{text}: şeklin altındaki soru (b)")
+    w.save(path)
+    return path
+
+
+def test_a_files_continuous_section_stays_continuous(work):
+    """Halil's midterm, last page: the figure in a 4-column section, question (b) below it in a 'continuous'
+    section. Merging removed the last section's type (= next page) and (b) went to a page of its own. Only a
+    file's FIRST section must start a new page; the others keep their type."""
+    import docx
+    from docx.enum.section import WD_SECTION
+    a = _docx(work / "1 a.docx", "Önceki dosya")
+    b = _two_section_docx(work / "2 b.docx", "Sınav")
+    c = _docx(work / "3 c.docx", "Sonraki dosya")
+    out = officetools.merge_to_word([a, b, c], noop, ordered=True)[0]
+    types = [s.start_type for s in docx.Document(str(out)).sections]
+    assert types[1:] == [WD_SECTION.NEW_PAGE, WD_SECTION.CONTINUOUS, WD_SECTION.NEW_PAGE], types
+
+
+@needs_soffice
+def test_continuous_section_renders_on_the_same_page(work):
+    a = _docx(work / "1 a.docx", "Önceki dosya")
+    b = _two_section_docx(work / "2 b.docx", "Sınav")
+    c = _docx(work / "3 c.docx", "Sonraki dosya")
+    out = officetools.merge_to_word([a, b, c], noop, ordered=True)[0]
+    outdir = work.parent / "render"
+    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(outdir), str(out)],
+                   capture_output=True, timeout=240)
+    texts = [p.get_text() for p in pymupdf.open(outdir / f"{out.stem}.pdf")]
+    assert len(texts) == 3, texts                                    # a | b (both sections) | c
+    assert "şekil sütunu" in texts[1] and "soru (b)" in texts[1] and "Sonraki" in texts[2]
+
+
 # ---------------------------------------------------------------- order window + main + history
 
 def test_main_word_choice(cfg, work, monkeypatch):
