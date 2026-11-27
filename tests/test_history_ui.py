@@ -504,3 +504,46 @@ def _all(root):
         stack.extend(w.winfo_children())
         out.append(w)
     return out
+
+
+# ---------------------------------------------------------------- the lock itself (no window; runs on Windows CI too)
+
+_HOLDER = r"""
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from riffle.single_instance import Instance
+i = Instance(sys.argv[2])
+print("got" if i.acquire() else "busy", flush=True)
+time.sleep(float(sys.argv[3]))
+"""
+
+
+def test_lock_between_processes(tmp_path):
+    from riffle.single_instance import Instance
+    first = Instance(tmp_path)
+    assert first.acquire()
+    other = subprocess.run([sys.executable, "-c", _HOLDER, str(ROOT), str(tmp_path), "0"], capture_output=True,
+                           text=True, timeout=60)
+    assert other.stdout.strip() == "busy", other.stderr
+    Instance(tmp_path).request("menu")
+    assert first.poll() == "menu" and first.poll() is None
+    first.release()
+    holder = subprocess.Popen([sys.executable, "-c", _HOLDER, str(ROOT), str(tmp_path), "30"],
+                              stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "got"
+        assert not Instance(tmp_path).acquire()
+    finally:
+        holder.kill()
+        holder.wait()
+    again = Instance(tmp_path)                       # the OS dropped the dead process's lock
+    assert again.acquire()
+    again.release()
+
+
+def test_stale_request_ignored(tmp_path):
+    from riffle.single_instance import Instance
+    (tmp_path / "pencere.istek").write_text("menu", encoding="utf-8")       # left over from a crash
+    i = Instance(tmp_path)
+    assert i.acquire() and i.poll() is None
+    i.release()

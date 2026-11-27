@@ -435,7 +435,7 @@ def test_get_one(cfg):
     a = history.record("rotate", ["/x/a.pdf"], ["/x/b.pdf"], options={"angle": 90})
     history.record("merge", ["/x/c.pdf"], [])
     j = history.get(a)
-    assert j["action_id"] == "rotate" and j["inputs"] == ["/x/a.pdf"] and j["options"] == {"angle": 90}
+    assert j["action_id"] == "rotate" and j["inputs"] == [os.path.abspath("/x/a.pdf")] and j["options"] == {"angle": 90}
     assert history.get(999) is None
 
 
