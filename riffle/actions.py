@@ -1879,7 +1879,11 @@ def office_to_pdf_many(paths: list[Path], outdir: Path, progress: Progress = lam
         for i, p in enumerate(paths):
             out = outdir / f"{i:03d}.pdf"
             progress(T("PDF'e çevriliyor: {0}", p.name))
-            if _office_com_to_pdf(p, out):
+            try:
+                ok = _office_com_to_pdf(p, out)
+            except Exception:                  # no Office: COM says 'Invalid class string' instead of False
+                ok = False
+            if ok:
                 result[p] = out
         if result:
             return result

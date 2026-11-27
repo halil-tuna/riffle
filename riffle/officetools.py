@@ -266,7 +266,7 @@ def _to_docx_all(paths: list[Path], tmp: Path, progress: Progress) -> tuple[list
     if rest:
         try:
             pdf_of.update(actions.office_to_pdf_many(rest, tmp / "lo_pdf", progress))
-        except ConversionError as e:
+        except Exception as e:                       # (a .docx then falls back to joining it as it is)
             for p in rest:
                 if p.suffix.lower() not in WORD_NATIVE:
                     errors.setdefault(p, f"{p.name}: {e}")

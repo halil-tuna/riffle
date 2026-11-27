@@ -247,6 +247,28 @@ def test_word_files_go_through_the_exact_layout(work):
     assert not any("olduğu gibi" in m or "as it is" in m for m in msgs)
 
 
+def test_windows_without_office_falls_back_instead_of_crashing(work, monkeypatch):
+    """Windows CI (no Office, no LibreOffice): Word's COM class doesn't exist and pywin32 RAISES
+    ('Invalid class string') instead of returning False — the whole merge crashed. Now: the fallback + a note.
+    The same error used to escape from 'Convert to PDF' too (office_to_pdf_many)."""
+    import sys
+    from riffle import actions
+
+    def com(*_a):
+        raise RuntimeError("Invalid class string")
+    monkeypatch.setattr(actions, "_find_soffice", lambda: None)
+    monkeypatch.setattr(actions, "_office_com_to_pdf", com)
+    monkeypatch.setattr(sys, "platform", "win32")
+    with pytest.raises(ConversionError):
+        actions.office_to_pdf_many([_docx(work / "x.docx")], work.parent / "o", noop)
+    msgs = []
+    a = make_text_pdf(work / "1 a.pdf", pages=1)
+    b = _docx(work / "2 b.docx", "Word bölümü")
+    out = officetools.merge_to_word([a, b], msgs.append, ordered=True)[0]
+    assert "Word bölümü" in _texts(out)
+    assert any("olduğu gibi" in m or "as it is" in m for m in msgs)
+
+
 def test_without_a_converter_word_files_are_joined_as_they_are(work, no_converter):
     msgs = []
     a = _docx(work / "1 a.docx", "Birinci")
