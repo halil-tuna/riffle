@@ -170,6 +170,53 @@ def test_full_mix_renders_page_by_page(work):
     assert sorted(p.name for p in work.iterdir()) == sorted([f.name for f in files] + [out.name])
 
 
+def _indented_docx(path: Path) -> Path:
+    """A homework-like Word file: Normal = justified with a 1.25 cm first-line indent."""
+    import docx
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Cm
+    w = docx.Document()
+    pf = w.styles["Normal"].paragraph_format
+    pf.alignment, pf.first_line_indent = WD_ALIGN_PARAGRAPH.JUSTIFY, Cm(1.25)
+    w.add_paragraph("Ödev metni, iki yana yaslı ve ilk satırı girintili. " * 12)
+    w.save(path)
+    return path
+
+
+def test_pdf_part_ignores_the_first_documents_normal_style(work):
+    """Halil: merging a homework .docx with PDFs, the PDF part of a worked solution came out broken. The exact
+    layout's paragraphs had no indent/alignment of their own, so they took the FIRST document's Normal style
+    (1.25 cm first-line indent): every line moved right and small boxes wrapped. Now they state both."""
+    import zipfile
+    import docx
+    first = _indented_docx(work / "1 odev.docx")
+    assert docx.Document(str(first)).styles["Normal"].paragraph_format.first_line_indent      # control: it IS there
+    make_text_pdf(work / "2 cozum.pdf", pages=1, table=False)
+    out = officetools.merge_to_word([first, work / "2 cozum.pdf"], noop, ordered=True)[0]
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode("utf-8")
+    import re
+    paras = [p for box in re.findall(r"<w:txbxContent>(.*?)</w:txbxContent>", xml, re.S)
+             for p in re.findall(r"<w:p>.*?</w:p>", box, re.S)]
+    assert paras
+    assert all('w:firstLine="0"' in p and '<w:jc w:val="left"/>' in p for p in paras)
+
+
+@needs_soffice
+def test_pdf_part_keeps_its_place_after_an_indented_document(work):
+    """Rendered: the PDF's first line starts where it starts on its own (before the fix: ~35 pt to the right)."""
+    first = _indented_docx(work / "1 odev.docx")
+    pdf = make_text_pdf(work / "2 cozum.pdf", pages=1, table=False)
+    word = pymupdf.open(pdf)[0].get_text("words")
+    x0 = min(w[0] for w in word if w[4].startswith("Paragraf"))
+    out = officetools.merge_to_word([first, pdf], noop, ordered=True)[0]
+    outdir = work.parent / "render"
+    subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(outdir), str(out)],
+                   capture_output=True, timeout=240)
+    pages = list(pymupdf.open(outdir / f"{out.stem}.pdf"))
+    words = [w for p in pages if "Paragraf" in p.get_text() for w in p.get_text("words")]
+    assert abs(min(w[0] for w in words if w[4].startswith("Paragraf")) - x0) < 3
+
+
 # ---------------------------------------------------------------- order window + main + history
 
 def test_main_word_choice(cfg, work, monkeypatch):

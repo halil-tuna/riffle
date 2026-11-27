@@ -265,6 +265,12 @@ def _run(text, font, size, bold, italic, color, extra: float = 0.0) -> str:
     return f'<w:r><w:rPr>{rpr}</w:rPr><w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
 
 
+# Every paragraph says its indent and alignment itself: inside a merged Word document (merge as Word) a paragraph
+# without them takes the FIRST document's Normal style — e.g. a homework's 1.25 cm first-line indent and justified
+# text shifted every line right, and small boxes (formulas, subscripts) wrapped and piled up.
+_NO_IND = '<w:ind w:left="0" w:right="0" w:firstLine="0"/>'
+_LEFT = '<w:jc w:val="left"/>'
+
 _ids = {"n": 0}
 
 
@@ -356,7 +362,7 @@ def _block_xml(lines) -> str:
         prev_bottom = r.y0 + line_h
         ppr = (f'<w:pPr><w:spacing w:before="{round(gap * TWIP)}" w:after="0" '
                f'w:line="{round(line_h * TWIP)}" w:lineRule="exact"/>'
-               f'<w:ind w:left="{round((r.x0 - box.x0) * TWIP)}"/></w:pPr>')
+               f'<w:ind w:left="{round((r.x0 - box.x0) * TWIP)}" w:right="0" w:firstLine="0"/>{_LEFT}</w:pPr>')
         paras.append("<w:p>" + ppr + "".join(_run(*s) for s in spans) + "</w:p>")
     height = (prev_bottom - box.y0) + 2
     width = box.width * 1.12 + 4  # don't cut the text if the Word font comes out slightly wider
@@ -370,7 +376,8 @@ def _vertical_xml(rect, spans, vert: str) -> str:
     line_h = max(rect.width, size * 1.05)
     length = rect.height * 1.12 + 4      # room if the Word font comes out slightly longer
     y = rect.y0 if vert == "vert" else rect.y1 - length
-    ppr = (f'<w:pPr><w:spacing w:before="0" w:after="0" w:line="{round(line_h * TWIP)}" w:lineRule="exact"/></w:pPr>')
+    ppr = (f'<w:pPr><w:spacing w:before="0" w:after="0" w:line="{round(line_h * TWIP)}" w:lineRule="exact"/>'
+           f'{_NO_IND}{_LEFT}</w:pPr>')
     para = "<w:p>" + ppr + "".join(_run(*s) for s in spans) + "</w:p>"
     return _anchor(rect.x0, y, line_h, length, _textbox(para, line_h, length, vert), False, "Metin")
 
@@ -417,7 +424,7 @@ def convert(pdf_path: Path, docx_path: Path, progress=lambda m: None, name: str 
                 '<w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/>'
                 '</w:sectPr>')
         # The paragraph itself is invisible and small; every page is a separate section
-        p_props = '<w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>'
+        p_props = '<w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>' + _NO_IND + _LEFT
         if pno < n - 1:
             body.append(f'<w:p><w:pPr>{p_props}{sect}</w:pPr>{content}</w:p>')
         else:
