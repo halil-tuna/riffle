@@ -9,13 +9,16 @@ This is a guarded add-on: the history must never break a conversion. Every error
 Several Riffle processes can write at the same time (5 files selected in Explorer, two windows…), so the
 storage is SQLite with short `BEGIN IMMEDIATE` transactions and a busy timeout. WAL is deliberately OFF:
 SQLite 3.7.0–3.51.2 has the "WAL-reset" bug (concurrent writers + checkpoints can silently lose data) and
-the Windows build's Python 3.12 ships SQLite 3.45.1. A rollback journal (journal_mode=DELETE) is safe there.
+the Windows build's Python 3.12 ships SQLite 3.45.1. A rollback journal is safe there: journal_mode=TRUNCATE
+(not DELETE: creating and deleting the journal file on every write is slow on Windows and wakes the virus scanner,
+which kept other writers waiting). A writer that still finds the file locked tries again a few times.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import random
 import sqlite3
 import time
 from datetime import datetime
@@ -27,6 +30,8 @@ DEFAULT_DAYS = 90
 MAX_JOBS = 1000
 PRUNE_EVERY = 20                 # prune old records on every 20th write
 BUSY_MS = 5000
+LOCK_RETRIES = 4                 # "database is locked" after BUSY_MS: try again (Windows, many writers at once)
+JOURNAL = "TRUNCATE"
 KEEP_BROKEN = 3                  # broken databases set aside (gecmis.bozuk-….sqlite3) kept at most
 MAX_NOTES = 200
 MAX_NOTE_LEN = 2000
@@ -110,7 +115,7 @@ def _open(path: Path) -> sqlite3.Connection:
     con = sqlite3.connect(str(path), timeout=BUSY_MS / 1000, isolation_level=None)
     try:
         con.execute(f"PRAGMA busy_timeout = {BUSY_MS}")
-        mode = con.execute("PRAGMA journal_mode = DELETE").fetchone()
+        mode = con.execute(f"PRAGMA journal_mode = {JOURNAL}").fetchone()
         if mode and str(mode[0]).lower() == "wal":       # could not leave WAL (another process holds it)
             raise HistoryUnavailable("journal_mode")
         con.execute("PRAGMA foreign_keys = ON")
@@ -185,8 +190,25 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     return _open(path)
 
 
+def _is_locked(e: BaseException) -> bool:
+    msg = str(e).lower()
+    return isinstance(e, sqlite3.OperationalError) and ("locked" in msg or "busy" in msg)
+
+
 def _tx(fn, path: Path | None = None):
-    """Runs fn(con) in one short write transaction. A broken file found mid-way: set aside, retried once."""
+    """Runs fn(con) in one short write transaction; if another process kept the file locked for longer than the
+    busy timeout, tries again after a short random pause (so the waiting writers don't collide again)."""
+    for attempt in range(LOCK_RETRIES + 1):
+        try:
+            return _tx_once(fn, path)
+        except sqlite3.OperationalError as e:
+            if not _is_locked(e) or attempt == LOCK_RETRIES:
+                raise
+            time.sleep(random.uniform(0.05, 0.4))
+
+
+def _tx_once(fn, path: Path | None = None):
+    """One write transaction. A broken file found mid-way: set aside, retried once."""
     for attempt in (0, 1):
         con = connect(path)
         try:

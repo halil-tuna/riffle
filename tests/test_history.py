@@ -7,6 +7,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -149,7 +150,10 @@ def test_setting_days(cfg):
 def test_no_wal(cfg):
     history.record("x", [])
     con = sqlite3.connect(history.db_path())
-    assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
+    assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"     # (a fresh connection's default)
+    con.close()
+    con = history.connect()
+    assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "truncate"    # rollback journal, never WAL
     assert con.execute("PRAGMA user_version").fetchone()[0] == history.SCHEMA_VERSION
     con.close()
     assert not Path(str(history.db_path()) + "-wal").exists()
@@ -169,6 +173,35 @@ for i in range(int(sys.argv[3])):
     ok += h.job_id is not None
 print(ok)
 """
+
+
+def test_locked_database_is_retried(cfg, monkeypatch):
+    """Another process holds the write lock longer than the busy timeout: the write waits it out and succeeds."""
+    import threading
+    history.record("ilk", [])
+    monkeypatch.setattr(history, "BUSY_MS", 200)
+    holder = sqlite3.connect(history.db_path(), isolation_level=None, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    threading.Timer(0.6, lambda: holder.execute("COMMIT")).start()
+    t0 = time.time()
+    assert history._write("ikinci", [], [], "ok", [], None, history._now(), history._now(), 1, None) > 0
+    assert time.time() - t0 >= 0.5 and history.count() == 2
+    holder.close()
+
+
+def test_lock_gives_up_eventually(cfg, monkeypatch):
+    history.record("ilk", [])
+    monkeypatch.setattr(history, "BUSY_MS", 50)
+    monkeypatch.setattr(history, "LOCK_RETRIES", 2)
+    holder = sqlite3.connect(history.db_path(), isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        assert history.record("bekleyen", []) is None                  # swallowed, never raised
+        with pytest.raises(sqlite3.OperationalError):
+            history._write("x", [], [], "ok", [], None, history._now(), history._now(), 1, None)
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
 
 
 def test_concurrent_writers(cfg):
