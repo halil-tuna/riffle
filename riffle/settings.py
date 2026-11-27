@@ -24,6 +24,9 @@ DEFAULTS = {
     "theme": "system",        # system | light | dark
     "check_updates": True,    # weekly check for a new release on GitHub
     "language": "auto",       # auto (system) | tr | en
+    "history": True,          # job history (only on this computer; see history.py)
+    "history_days": 90,       # history records older than this are deleted
+    "first_run_done": False,  # the welcome window was shown once
 }
 FAV_AUTO = 3
 FAV_MIN_USES = 3

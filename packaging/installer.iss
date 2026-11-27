@@ -3,7 +3,7 @@
 ; No admin rights needed: installs under %LOCALAPPDATA%\Programs\Riffle, the menu is written to HKCU.
 
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #define AppVersion "1.2.0-dev"
 #endif
 
 [Setup]

@@ -142,29 +142,41 @@ def main(argv: list[str] | None = None) -> int:
     def job(progress):
         errors = [T("{0}: desteklenmeyen dosya, atlandı", n) for n in skipped]
         outputs: list[Path] = []
+        hist = _history_job(action.id, paths, kwargs)      # never raises; does nothing if off/broken
 
         def prog(m):
             parallel.check_cancel()
             progress(m)
+            if m.startswith("ℹ "):
+                hist.note("info", m[2:])
 
-        try:
-            if use_parallel:
-                outs, errs = parallel.run_files(action.id, paths, kwargs, prog)
-                outputs += outs
-                errors += errs
-            else:
-                # Batch actions (merge, image → PDF) in one call, the rest file by file
-                batches = [paths] if action.batch else [[p] for p in paths]
-                for batch in batches:
-                    parallel.check_cancel()
-                    try:
-                        outputs += action.func(batch, prog, **kwargs)
-                    except ConversionError as e:
-                        errors.append(str(e))
-                    except Exception as e:
-                        errors.append(f"{batch[0].name}: {type(e).__name__}: {e}")
-        except parallel.Cancelled:
-            errors.append(T("İptal edildi") + (T(" ({0} dosya tamamlanmıştı).", len(outputs)) if outputs else "."))
+        with hist:
+            for e in errors:
+                hist.note("warn", e)
+            try:
+                if use_parallel:
+                    outs, errs = parallel.run_files(action.id, paths, kwargs, prog)
+                    outputs += outs
+                    errors += errs
+                    for e in errs:
+                        hist.note("error", e)
+                else:
+                    # Batch actions (merge, image → PDF) in one call, the rest file by file
+                    batches = [paths] if action.batch else [[p] for p in paths]
+                    for batch in batches:
+                        parallel.check_cancel()
+                        try:
+                            outputs += action.func(batch, prog, **kwargs)
+                        except ConversionError as e:
+                            errors.append(str(e))
+                            hist.note("error", str(e))
+                        except Exception as e:
+                            errors.append(f"{batch[0].name}: {type(e).__name__}: {e}")
+                            hist.note("error", errors[-1])
+            except parallel.Cancelled:
+                errors.append(T("İptal edildi") + (T(" ({0} dosya tamamlanmıştı).", len(outputs)) if outputs else "."))
+                hist.status("cancelled")
+            hist.outputs(outputs)
         return outputs, errors
 
     n = len(paths)
@@ -194,6 +206,28 @@ def _apply_output_setting(paths, settings, ui) -> None:
             actions.OUTPUT_REDIRECT[Path(p).resolve().parent] = target
         except OSError:
             pass
+
+
+class _NoHistory:
+    """Stand-in when the history module cannot even be imported: every call does nothing."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __getattr__(self, name):
+        return lambda *a, **k: None
+
+
+def _history_job(action_id: str, paths, kwargs):
+    """Job history (history.py) is a guarded add-on: whatever goes wrong there, the conversion is not affected."""
+    try:
+        from . import history
+        return history.safe_job(action_id, paths, kwargs)
+    except Exception:
+        return _NoHistory()
 
 
 def _count_use(action_id: str, settings) -> None:
