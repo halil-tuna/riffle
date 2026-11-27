@@ -195,6 +195,235 @@ def merge_word(paths: list[Path], progress: Progress, ordered: bool = False, **_
     return [out]
 
 
+# ============================================================ merge mixed files as one Word document
+
+WORD_NATIVE = {".docx"}
+WORD_LO = {".doc", ".odt", ".rtf", ".txt", ".html", ".htm"}          # LibreOffice → .docx
+VIA_PDF = {".ppt", ".pptx", ".odp", ".xls", ".xlsx", ".ods", ".csv"}  # LibreOffice → PDF → Riffle's PDF → Word
+
+
+def merge_to_word(paths: list[Path], progress: Progress, ordered: bool = False, **_) -> list[Path]:
+    """PDF, Word, PowerPoint, Excel and image files → ONE Word document, in the given order.
+
+    Every file is first made a .docx in a temporary folder (nothing is left next to the sources): PDFs with
+    Riffle's own PDF → Word (slides and two-column papers keep their layout), slides and sheets through PDF,
+    .doc/.odt/.rtf with LibreOffice, images as a page with the picture. Then they are joined; each file starts
+    on a new page and keeps its own page size and orientation (a landscape slide stays landscape)."""
+    from .actions import sorted_by_name
+    paths = [Path(p) for p in (paths if ordered else sorted_by_name(list(paths)))]
+    if len(paths) < 2:
+        raise ConversionError(T("Birleştirmek için en az iki dosya seç."))
+    try:
+        from docx import Document  # noqa: F401
+        from docxcompose.composer import Composer  # noqa: F401
+    except ImportError:
+        raise ConversionError(T("Word birleştirme için gerekli: pip install docxcompose"))
+    with tempfile.TemporaryDirectory(prefix="riffle_wm_") as tmp:
+        tmp = Path(tmp)
+        parts, skipped = _to_docx_all(paths, tmp, progress)
+        if not parts:
+            raise ConversionError("\n".join(skipped) or T("Birleştirilecek sayfa yok."))
+        first = paths[0]
+        out = unique_path(first.parent, f"{first.stem}_birlesik", ".docx")
+        progress(T("Word belgesi kuruluyor: {0} parça", len(parts)))
+        _compose_sections([d for _, d in parts], out, progress)
+    for e in skipped:
+        progress(T("ℹ atlandı → {0}", e))
+    progress(T("ℹ {0} dosya tek Word belgesinde birleştirildi; her dosya yeni sayfada, kendi sayfa yönüyle başlar.",
+               len(parts)))
+    return [out]
+
+
+def _to_docx_all(paths: list[Path], tmp: Path, progress: Progress) -> tuple[list, list[str]]:
+    """[(source, docx in tmp)] in order + error lines for the files that could not be converted."""
+    from . import actions
+    docx_of: dict[Path, Path] = {}
+    errors: dict[Path, str] = {}
+    by_lo_docx = [p for p in paths if p.suffix.lower() in WORD_LO]
+    by_pdf = [p for p in paths if p.suffix.lower() in VIA_PDF]
+    pdf_of: dict[Path, Path] = {}
+    if by_lo_docx:                                     # one LibreOffice call for all of them
+        try:
+            docx_of.update(_lo_convert(by_lo_docx, tmp / "lo_docx", "docx", progress))
+        except ConversionError as e:
+            for p in by_lo_docx:
+                errors[p] = f"{p.name}: {e}"
+        for p in by_lo_docx:
+            if p not in docx_of and p not in errors:
+                by_pdf.append(p)                       # LibreOffice could not make a .docx: try through PDF
+    if by_pdf:
+        try:
+            pdf_of.update(actions.office_to_pdf_many(by_pdf, tmp / "lo_pdf", progress))
+        except ConversionError as e:
+            for p in by_pdf:
+                errors.setdefault(p, f"{p.name}: {e}")
+    for i, p in enumerate(paths):
+        if p in errors or p in docx_of:
+            continue
+        ext = p.suffix.lower()
+        try:
+            if ext in WORD_NATIVE:
+                docx_of[p] = p
+            elif ext == ".pdf" or p in pdf_of:
+                src = pdf_of.get(p, p)
+                docx_of[p] = _pdf_to_docx(src, p, tmp / f"w{i:03d}", progress)
+            elif ext.lstrip(".") in actions.IMAGES:
+                docx_of[p] = _image_to_docx(p, tmp / f"w{i:03d}.docx")
+            elif p not in pdf_of:
+                errors[p] = T("{0}: desteklenmeyen dosya, atlandı", p.name)
+        except actions.ConversionError as e:
+            errors[p] = str(e)
+        except Exception as e:
+            errors[p] = f"{p.name}: {type(e).__name__}: {e}"
+    parts = [(p, docx_of[p]) for p in paths if p in docx_of]
+    return parts, [errors[p] for p in paths if p in errors]
+
+
+def _pdf_to_docx(src: Path, original: Path, work: Path, progress: Progress) -> Path:
+    """Riffle's PDF → Word on a copy inside the temporary folder (so nothing appears next to the source);
+    messages name the original file."""
+    from . import actions
+    work.mkdir(parents=True, exist_ok=True)
+    copy = work / (original.stem + ".pdf")
+    shutil.copyfile(src, copy)
+
+    def prog(m):
+        progress(m.replace(copy.name, original.name))
+    outs = actions.pdf_to_word([copy], prog)
+    if not outs:
+        raise ConversionError(T("{0} Word'e çevrilemedi.", original.name))
+    return outs[0]
+
+
+def _image_to_docx(p: Path, out: Path) -> Path:
+    """One page with the picture fitted inside the margins (portrait or landscape like the picture)."""
+    from docx import Document
+    from docx.enum.section import WD_ORIENT
+    from docx.shared import Cm
+    from PIL import Image, ImageOps
+    if p.suffix.lower() in (".heic", ".heif"):
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    with Image.open(p) as im:
+        im = ImageOps.exif_transpose(im)
+        w, h = im.size
+        png = out.with_suffix(".png")
+        (im.convert("RGBA") if im.mode in ("RGBA", "LA", "P") else im.convert("RGB")).save(png)
+    doc = Document()
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Cm(21.0), Cm(29.7)
+    if w > h:
+        sec.orientation = WD_ORIENT.LANDSCAPE
+        sec.page_width, sec.page_height = Cm(29.7), Cm(21.0)
+    for side in ("left_margin", "right_margin", "top_margin", "bottom_margin"):
+        setattr(sec, side, Cm(1.5))
+    box_w = sec.page_width - sec.left_margin - sec.right_margin
+    box_h = sec.page_height - sec.top_margin - sec.bottom_margin - Cm(1)
+    scale = min(box_w / w, box_h / h)
+    para = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph()
+    para.alignment = 1                                   # centre
+    para.add_run().add_picture(str(png), width=int(w * scale), height=int(h * scale))
+    doc.save(str(out))
+    return out
+
+
+def _lo_convert(paths: list[Path], outdir: Path, fmt: str, progress: Progress) -> dict:
+    """{source: converted file} with ONE LibreOffice call (like actions.office_to_pdf_many)."""
+    import sys
+    from . import actions
+    soffice = actions._find_soffice()
+    if not soffice:
+        return {}                                        # → through PDF (Office on Windows can do that part)
+    outdir.mkdir(parents=True, exist_ok=True)
+    staged = []
+    for i, p in enumerate(paths):
+        dst = outdir / "_kaynak" / f"{i:03d}{p.suffix.lower()}"
+        dst.parent.mkdir(exist_ok=True)
+        shutil.copyfile(p, dst)
+        staged.append(dst)
+    progress(T("Word'e çevriliyor: {0} dosya", len(paths)) if len(paths) > 1 else
+             T("Word'e çevriliyor: {0}", paths[0].name))
+    flags = 0x08000000 if sys.platform == "win32" else 0
+    with actions._LoProfile() as profile:
+        cmd = [soffice, f"-env:UserInstallation={profile}", "--headless", "--convert-to", fmt,
+               "--outdir", str(outdir), *map(str, staged)]
+        actions._run_cancellable(cmd, 120 + 120 * len(paths), flags)
+    return {p: outdir / f"{st.stem}.{fmt}" for p, st in zip(paths, staged) if (outdir / f"{st.stem}.{fmt}").exists()}
+
+
+def _compose_sections(parts: list[Path], out: Path, progress: Progress) -> None:
+    """Joins .docx files; every part starts a new section that keeps ITS page size, margins and orientation.
+
+    docxcompose drops an appended document's last section properties (its body sectPr): a landscape slide
+    deck would end on A4 portrait pages. So before each part the current last section is closed with a
+    section break carrying its own properties, and after the part the body's properties are replaced by
+    the part's (page setup only: headers/footers stay those of the first document, as in Word merging)."""
+    from copy import deepcopy
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docxcompose.composer import Composer
+    master = Document(str(parts[0]))
+    comp = Composer(master)
+    body = master.element.body
+    keep = (qn("w:pgSz"), qn("w:pgMar"), qn("w:cols"), qn("w:docGrid"), qn("w:vAlign"), qn("w:textDirection"))
+    for k, part in enumerate(parts[1:], 2):
+        progress(T("Ekleniyor ({0}/{1}): {2}", k, len(parts), part.name))
+        try:
+            doc = Document(str(part))
+        except Exception as e:
+            raise ConversionError(T("{0} açılamadı: {1}", part.name, e))
+        _close_last_section(master)
+        comp.append(doc)
+        src = doc.element.body.find(qn("w:sectPr"))
+        dst = body.find(qn("w:sectPr"))
+        if src is not None and dst is not None:
+            for tag in keep:
+                for old in dst.findall(tag):
+                    dst.remove(old)
+            hdr = {qn("w:headerReference"), qn("w:footerReference")}
+            pos = sum(1 for c in dst if c.tag in hdr)          # page setup goes after the header/footer refs
+            for tag in keep:
+                for el in src.findall(tag):
+                    dst.insert(pos, deepcopy(el))
+                    pos += 1
+            ttype = dst.find(qn("w:type"))
+            if ttype is not None:
+                dst.remove(ttype)                               # (default = next page)
+    comp.save(str(out))
+
+
+def _close_last_section(master) -> None:
+    """Ends the document's current last section here, with a copy of its properties (a section break)."""
+    from copy import deepcopy
+    from docx.oxml.ns import qn
+    body = master.element.body
+    sect = body.find(qn("w:sectPr"))
+    if sect is None:
+        return
+    last = None
+    for el in reversed(list(body)):
+        if el.tag == qn("w:sectPr"):
+            continue
+        last = el
+        break
+    if last is not None and last.tag == qn("w:p") and last.find(qn("w:pPr") + "/" + qn("w:sectPr")) is None:
+        p = last
+        run = p[-1] if len(p) else None                         # a page break at the very end of the last
+        if run is not None and run.tag == qn("w:r") and len(run) and run[-1].tag == qn("w:br") \
+                and run[-1].get(qn("w:type")) == "page":        # paragraph would leave an empty page
+            run.remove(run[-1])
+    else:
+        from docx.oxml import OxmlElement
+        p = OxmlElement("w:p")
+        sect.addprevious(p)
+    ppr = p.find(qn("w:pPr"))
+    if ppr is None:
+        from docx.oxml import OxmlElement
+        ppr = OxmlElement("w:pPr")
+        p.insert(0, ppr)
+    ppr.append(deepcopy(sect))
+
+
 # ============================================================ CSV → Excel
 
 ENCODINGS = ("utf-8-sig", "utf-16", "cp1254", "iso-8859-9", "cp1252")

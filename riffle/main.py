@@ -110,11 +110,19 @@ def main(argv: list[str] | None = None, _replay: dict | None = None) -> int:
         from .actions import sorted_by_name
         ok_text = T("Birleştir") if action.quick or action.id in ("merge", "wordmerge") else T("Tamam")
         start = paths if replay.get("ordered") else sorted_by_name(paths)     # again: the order used last time
+        can_word = action.id in ("merge", "organize")                    # result: one PDF or one Word document
         answer = ui.ask_order(start, T(action.label), T(action.order), ok_text,
-                              allow_pages=action.id != "wordmerge")     # Word merging should not go to PDF
+                              allow_pages=action.id != "wordmerge",     # Word merging should not go to PDF
+                              **({"formats": True, "fmt": replay.get("format")} if can_word else {}))
         if answer is None:
             return 1                     # Cancel
         mode, paths = answer
+        if mode == "word":               # everything converted to Word and joined as one .docx
+            from .actions import _t
+            kwargs["ordered"] = True
+            kwargs["format"] = "word"
+            action = replace(action, func=_t("merge_to_word", "officetools"), interactive=False, batch=True,
+                             quick=None)
         if mode == "organize":           # "Edit page by page…": the organizer, in the chosen order
             from .tools import organize
             try:

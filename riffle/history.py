@@ -40,7 +40,7 @@ LEVELS = ("info", "warn", "error")
 
 # Options that may be stored (and reused by "Convert again"). Anything else is dropped — above all
 # "password", and "words" of the redaction tool (it may hold ID numbers, phone numbers…).
-SAFE_OPTIONS = frozenset({"mode", "angle", "per", "level", "target", "size", "pages", "text", "ordered"})
+SAFE_OPTIONS = frozenset({"mode", "angle", "per", "level", "target", "size", "pages", "text", "ordered", "format"})
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (

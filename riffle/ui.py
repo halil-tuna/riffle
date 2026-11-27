@@ -160,17 +160,22 @@ def _describe(p: Path) -> str:
     return info
 
 
-def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = None, allow_pages: bool = True):
+def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = None, allow_pages: bool = True,
+              formats: bool = False, fmt: str | None = None):
     """Small window to choose the file order (doesn't open pages, appears instantly).
 
     Returns: ("ok", ordered list) · ("organize", ordered list) = open in the page organizer · Cancel: None
+    formats=True: a "Result: PDF | Word" choice (last choice remembered, fmt = preselect);
+    Word → ("word", ordered list).
 
     Drag and drop · ↑/↓ buttons · Ctrl+↑/↓ move · Del remove · A→Z / Z→A / by date · Enter OK.
     """
     preset = os.environ.get("RIFFLE_ORDER")          # automated tests: "name" = OK, "organize" = organizer
     if preset == "organize":
         return ("organize", list(paths))
-    if not _gui() or preset == "name":
+    if preset == "word" and formats:
+        return ("word", list(paths))
+    if not _gui() or preset in ("name", "word"):
         return ("ok", list(paths))       # no window: name order
     items = list(paths)
     ok_text = ok_text or T("Tamam")
@@ -287,11 +292,39 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = No
 
     foot = ttk.Frame(frm, padding=(0, 14, 0, 0))
     foot.pack(fill="x")
+    pages_btn = None
     if allow_pages:
-        ttk.Button(foot, text=T("Sayfa sayfa düzenle…"),
-                   command=lambda: done(("organize", list(items)))).pack(side="left")
+        pages_btn = ttk.Button(foot, text=T("Sayfa sayfa düzenle…"),
+                               command=lambda: done(("organize", list(items))))
+        pages_btn.pack(side="left")
+    out_fmt = tk.StringVar(value=fmt or (_merge_format() if formats else "pdf"))
+
+    def finish():
+        if formats and out_fmt.get() == "word":
+            _merge_format("word")
+            return ("word", list(items))
+        if formats:
+            _merge_format("pdf")
+        return ("ok", list(items))
+
+    if formats:                                    # result: one PDF (default) or one Word document
+        box = ttk.Frame(foot)
+        box.pack(side="left", padx=(16 if allow_pages else 0, 0))
+        ttk.Label(box, text=T("Sonuç:")).pack(side="left", padx=(0, 6))
+
+        def fmt_changed():
+            if pages_btn is not None:              # the page organizer makes a PDF
+                pages_btn.state(["disabled"] if out_fmt.get() == "word" else ["!disabled"])
+        for val, text in (("pdf", "PDF"), ("word", "Word")):
+            try:
+                rb = ttk.Radiobutton(box, text=text, value=val, variable=out_fmt, style="Toggle.TButton",
+                                     command=fmt_changed)
+            except tk.TclError:
+                rb = ttk.Radiobutton(box, text=text, value=val, variable=out_fmt, command=fmt_changed)
+            rb.pack(side="left", padx=(0, 4))
+        fmt_changed()
     ok_btn = ttk.Button(foot, text=ok_text, style="Accent.TButton", width=12,
-                        command=lambda: done(("ok", list(items))))
+                        command=lambda: done(finish()))
     ok_btn.pack(side="right")
     ttk.Button(foot, text=T("İptal"), width=10, command=lambda: done(None)).pack(side="right", padx=8)
 
@@ -303,7 +336,7 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = No
                     ("<Delete>", remove)):
         tree.bind(seq, lambda e, fn=fn: (fn(), "break")[1])
         key(seq, fn)
-    key("<Return>", lambda: done(("ok", list(items))) if len(items) >= 2 else None)
+    key("<Return>", lambda: done(finish()) if len(items) >= 2 else None)
     key("<Escape>", lambda: done(None))
     root.protocol("WM_DELETE_WINDOW", lambda: done(None))
     refresh(0)
@@ -314,6 +347,21 @@ def ask_order(paths: list[Path], title: str, hint: str, ok_text: str | None = No
         root.after(int(auto), lambda: done(None))
     root.mainloop()
     return result["value"]
+
+
+def _merge_format(value: str | None = None) -> str:
+    """The last chosen result of merging ("pdf" | "word"), kept in the settings."""
+    try:
+        from . import settings
+        s = settings.load()
+        if value is None:
+            return s.get("merge_format", "pdf")
+        if s.get("merge_format") != value:
+            s["merge_format"] = value
+            settings.save(s)
+        return value
+    except Exception:
+        return value or "pdf"
 
 
 def run_with_window(title: str, job: Callable[[Callable[[str], None]], tuple[list[Path], list[str]]],

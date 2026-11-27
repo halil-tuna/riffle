@@ -548,4 +548,13 @@ CATALOG = {
     'Başla': 'Start',
     'Simgeler': 'Icons',
     'Liste': 'List',
+    # --- Merge as one Word document
+    'ℹ {0} dosya tek Word belgesinde birleştirildi; her dosya yeni sayfada, kendi sayfa yönüyle başlar.':
+        'ℹ {0} files merged into one Word document; each starts on a new page with its own page orientation.',
+    'Birleştirmek için en az iki dosya seç.': 'Select at least two files to merge.',
+    'Word belgesi kuruluyor: {0} parça': 'Building the Word document: {0} parts',
+    "{0} Word'e çevrilemedi.": '{0} could not be converted to Word.',
+    "Word'e çevriliyor: {0} dosya": 'Converting to Word: {0} files',
+    "Word'e çevriliyor: {0}": 'Converting to Word: {0}',
+    'Sonuç:': 'Result:',
 }

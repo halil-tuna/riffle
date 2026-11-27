@@ -28,6 +28,7 @@ DEFAULTS = {
     "history_days": 90,       # history records older than this are deleted
     "first_run_done": False,  # the welcome window was shown once
     "history_view": "list",   # History tab: list | icons
+    "merge_format": "pdf",    # merging mixed files: one PDF | one Word document (order window)
 }
 FAV_AUTO = 3
 FAV_MIN_USES = 3
@@ -375,7 +376,9 @@ def run(paths=None, progress=print, tab: str | None = None, **_) -> list:
         s["language"] = lang_var.get()
         s["history"] = hist_on.get()
         s["history_days"] = day_choices.get(days_var.get(), 90)
-        s["history_view"] = load().get("history_view", "list")   # chosen in the History tab meanwhile
+        fresh = load()                                            # chosen elsewhere meanwhile
+        s["history_view"] = fresh.get("history_view", "list")
+        s["merge_format"] = fresh.get("merge_format", "pdf")
         if s["output"] == "folder" and not Path(s["output_dir"]).is_dir():
             messagebox.showerror(APP_NAME, T("Seçilen çıktı klasörü bulunamadı."), parent=root)
             return
